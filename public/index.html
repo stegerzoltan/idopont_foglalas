@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Időpontfoglalás</title>
+  <link rel="stylesheet" href="/styles.css?v=20260313" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <p class="brand-kicker">Stégermájer Zoltán edzésére</p>
+      <h1>Időpontfoglalás</h1>
+    </div>
+    <nav class="site-nav">
+      <div class="user-pill" id="user-pill" hidden></div>
+      <div class="admin-pill" id="admin-pill" hidden>Admin belépve</div>
+      <button id="open-pass" class="ghost" hidden>Bérlet</button>
+      <button id="open-signups" class="ghost" hidden>Feliratkozások</button>
+      <button id="open-user" class="ghost">Belépés / Regisztráció</button>
+      <button id="open-admin" class="ghost">Admin belépés</button>
+    </nav>
+  </header>
+
+  <main>
+    <section>
+      <div class="section-title">
+        <h3 id="week-title" class="week-title">Hét edzések</h3>
+        <div class="quick-menu" id="quick-menu">
+          <div class="quick-buttons" id="day-menu"></div>
+        </div>
+      </div>
+      <div class="calendar-wrap">
+        <div id="class-list" class="calendar"></div>
+      </div>
+    </section>
+  </main>
+
+  <button id="scroll-top" class="scroll-top" aria-label="Ugrás a tetejére" hidden>
+    ↑
+  </button>
+
+  <div class="modal" id="signup-modal" aria-hidden="true">
+    <div class="modal-content">
+      <button class="icon-button" id="close-signup" aria-label="Bezárás">x</button>
+      <h3>Feliratkozás</h3>
+      <form id="signup-form">
+        <input type="hidden" id="signup-class-id" />
+        <p class="helper" id="signup-login-state"></p>
+        <label>
+          Név
+          <input type="text" id="signup-name" required disabled />
+        </label>
+        <label>
+          Email
+          <input type="email" id="signup-email" required disabled />
+        </label>
+        <div class="form-actions">
+          <button type="button" class="ghost" id="signup-login">Bejelentkezés</button>
+          <button type="submit" class="primary">Megerősítem</button>
+        </div>
+        <p class="helper" id="signup-message"></p>
+      </form>
+      <div class="my-signups" id="my-signups" hidden>
+        <h4>Saját feliratkozások</h4>
+        <div class="stack" id="my-signups-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="user-modal" aria-hidden="true">
+    <div class="modal-content">
+      <button class="icon-button" id="close-user" aria-label="Bezárás">x</button>
+      <h3>Belépés / Regisztráció</h3>
+      <div class="auth-toggle" role="tablist" aria-label="Belépés vagy regisztráció">
+        <button type="button" class="ghost is-active" id="auth-login">Belépés</button>
+        <button type="button" class="ghost" id="auth-register">Regisztráció</button>
+      </div>
+      <form id="user-login-form">
+        <label class="auth-register-only">
+          Név
+          <input type="text" id="user-full-name" />
+        </label>
+        <label>
+          Email
+          <input type="email" id="user-email" required />
+        </label>
+        <label>
+          Jelszó
+          <input type="password" id="user-password" required />
+        </label>
+        <label class="auth-register-only">
+          Születési dátum
+          <input
+            type="text"
+            id="user-birth-date"
+            placeholder="YYYY-MM-DD"
+            pattern="\d{4}-\d{2}-\d{2}"
+            inputmode="numeric"
+          />
+        </label>
+        <label class="auth-register-only">
+          Telefonszám
+          <input type="tel" id="user-phone" />
+        </label>
+        <div class="consent-box auth-register-only" id="consent-text">
+          <p>Nyilatkozat a szolgáltatás saját felelősségre történő igénybevételéről</p>
+          <p>A regisztráció véglegesítésével és a szolgáltatás igénybevételével alulírott kijelentem és elfogadom az alábbiakat:</p>
+          <p>Egészségügyi állapot: Kijelentem, hogy a választott edzésformához szükséges megfelelő fizikai és mentális állapotban vagyok. Nincs tudomásom olyan betegségről, sérülésről vagy egyéb egészségügyi korlátozásról, amely a fizikai aktivitást számomra veszélyessé tenné.</p>
+          <p>Saját felelősség: Tudomásul veszem, hogy az edzéseken saját felelősségemre veszek részt. Megértem, hogy a sporttevékenység során – a legnagyobb szakmai odafigyelés mellett is – fennállhat a sérülés veszélye.</p>
+          <p>Tájékoztatási kötelezettség: Vállalom, hogy az edzőt minden alkalommal tájékoztatom az aktuális fizikai állapotomról (pl. aktuális fájdalom, rendkívüli fáradtság, esetleges várandósság), és az edzés során fellépő bármilyen rosszullétet vagy fájdalmat azonnal jelzek.</p>
+          <p>Utasítások betartása: Kötelezettséget vállalok az edző szakmai utasításainak betartására és az eszközök rendeltetésszerű használatára. Az ezektől való eltérésből eredő sérülésekért az edzőt felelősség nem terheli.</p>
+          <p>Kárfelelősség kizárása: Az edző nem vállal felelősséget a személyes tárgyak elvesztéséért, illetve az olyan balesetekért, amelyek az ügyfél gondatlanságából vagy a házirend be nem tartásából adódnak.</p>
+        </div>
+        <label class="consent-check auth-register-only">
+          <input type="checkbox" id="user-consent" />
+          Elolvastam és elfogadom a felelősségvállalási nyilatkozatot.
+        </label>
+        <button type="submit" class="primary" id="auth-submit">Belépek</button>
+        <p class="helper" id="user-login-message"></p>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal" id="admin-modal" aria-hidden="true">
+    <div class="modal-content large">
+      <button class="icon-button" id="close-admin" aria-label="Bezárás">x</button>
+      <div class="admin-shell">
+        <div class="admin-login">
+          <h3>Admin belépés</h3>
+          <form id="admin-login-form">
+            <label>
+              Email
+              <input type="email" id="admin-email" required />
+            </label>
+            <label>
+              Jelszó
+              <input type="password" id="admin-password" required />
+            </label>
+            <button type="submit" class="primary">Belépek</button>
+            <p class="helper" id="admin-login-message"></p>
+          </form>
+        </div>
+
+        <div class="admin-panel" id="admin-panel" hidden>
+          <div class="panel-header">
+            <div>
+              <h3>Óra kezelése</h3>
+              <p class="helper">Itt tudod módosítani az órákat.</p>
+            </div>
+            <button id="admin-logout" class="ghost">Kijelentkezés</button>
+          </div>
+
+          <div class="notice push-panel">
+            <strong>Telefonos értesítés</strong>
+            <p class="helper">Kapj értesítést, ha új feliratkozás érkezik.</p>
+            <button type="button" class="primary" id="enable-push">Értesítés bekapcsolása</button>
+            <p class="helper" id="push-status"></p>
+          </div>
+
+          <div class="notice pass-panel">
+            <strong>Bérlet rögzítése</strong>
+            <p class="helper">10 alkalmas bérlet hozzáadása felhasználóhoz.</p>
+            <div class="form-actions">
+              <input type="email" id="pass-email" placeholder="user@email" />
+              <button type="button" class="primary" id="assign-pass">Bérlet rögzítése</button>
+            </div>
+            <p class="helper" id="pass-admin-status"></p>
+          </div>
+
+          <form id="class-form" class="class-form">
+            <input type="hidden" id="class-id" />
+            <label>
+              Óra neve
+              <input type="text" id="class-title" required />
+            </label>
+            <label>
+              Edző
+              <input type="text" id="class-coach" />
+            </label>
+            <label>
+              Kezdés
+              <input type="datetime-local" id="class-starts" required />
+            </label>
+            <label>
+              Létszám
+              <input type="number" id="class-capacity" min="1" required />
+            </label>
+            <label class="span-2">
+              Megjegyzés
+              <textarea id="class-notes" rows="3"></textarea>
+            </label>
+            <div class="form-actions span-2">
+              <button type="submit" class="primary" id="save-class">Mentem</button>
+              <button type="button" class="ghost" id="reset-class">Új óra</button>
+            </div>
+            <p class="helper span-2" id="class-message"></p>
+          </form>
+
+          <h4 class="section-title">Értesítések</h4>
+          <div id="admin-notifications" class="stack"></div>
+
+          <h4 class="section-title">Folyamatban lévő órák</h4>
+          <div id="admin-class-list" class="card-grid"></div>
+
+          <h4 class="section-title">Feliratkozások</h4>
+          <div id="admin-signups" class="stack"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="signups-modal" aria-hidden="true">
+    <div class="modal-content">
+      <button class="icon-button" id="close-signups" aria-label="Bezárás">x</button>
+      <h3>Feliratkozások</h3>
+      <div class="stack" id="signups-list"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="pass-modal" aria-hidden="true">
+    <div class="modal-content">
+      <button class="icon-button" id="close-pass" aria-label="Bezárás">x</button>
+      <h3>Bérlet</h3>
+      <div class="stack" id="pass-summary"></div>
+      <h4>Alkalmak</h4>
+      <div class="stack" id="pass-uses"></div>
+    </div>
+  </div>
+
+  <script src="/app.js?v=20260313"></script>
+</body>
+</html>
