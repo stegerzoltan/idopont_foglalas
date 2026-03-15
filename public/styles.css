@@ -692,6 +692,20 @@ input, textarea {
   align-items: center;
 }
 
+.pass-panel .form-actions {
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.pass-panel input,
+.pass-panel select {
+  flex: 1 1 160px;
+}
+
+.pass-panel button {
+  flex: 1 1 160px;
+}
+
 .span-2 {
   grid-column: span 2;
 }
