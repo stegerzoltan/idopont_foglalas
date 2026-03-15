@@ -1,8 +1,10 @@
 require("dotenv").config();
 process.env.TZ = process.env.TZ || "Europe/Budapest";
 const path = require("path");
+const fs = require("fs");
 const express = require("express");
 const session = require("express-session");
+const { Pool } = require("pg");
 const sqlite3 = require("sqlite3").verbose();
 const crypto = require("crypto");
 const webpush = require("web-push");
@@ -14,6 +16,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || `mailto:${ADMIN_EMAIL}`;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
+const IS_POSTGRES = Boolean(process.env.DATABASE_URL);
 let vapidKeys = {
   publicKey: process.env.VAPID_PUBLIC_KEY,
   privateKey: process.env.VAPID_PRIVATE_KEY,
@@ -51,83 +54,247 @@ app.use(
   }),
 );
 
-const db = new sqlite3.Database(path.join(__dirname, "data.db"));
+const normalizeSql = (sql) => {
+  let index = 0;
+  return sql.replace(/\?/g, () => `$${++index}`);
+};
 
-db.serialize(() => {
-  db.run(
-    `CREATE TABLE IF NOT EXISTS classes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      coach TEXT,
-      starts_at TEXT NOT NULL,
-      capacity INTEGER NOT NULL,
-      notes TEXT
-    )`,
-  );
-  db.run(
-    `CREATE TABLE IF NOT EXISTS signups (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      class_id INTEGER NOT NULL,
-      name TEXT NOT NULL,
-      email TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      FOREIGN KEY(class_id) REFERENCES classes(id)
-    )`,
-  );
-  db.run(
-    `CREATE TABLE IF NOT EXISTS notifications (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      type TEXT NOT NULL,
-      message TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )`,
-  );
-  db.run(
-    `CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      full_name TEXT NOT NULL,
-      email TEXT NOT NULL UNIQUE,
-      birth_date TEXT NOT NULL,
-      phone TEXT NOT NULL,
-      password_hash TEXT,
-      password_salt TEXT,
-      consent_text TEXT NOT NULL,
-      consent_accepted_at TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )`,
-  );
-  db.run(
-    `CREATE TABLE IF NOT EXISTS push_subscriptions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      endpoint TEXT NOT NULL UNIQUE,
-      subscription TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )`,
-  );
-  db.run(
-    `CREATE TABLE IF NOT EXISTS passes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_email TEXT NOT NULL,
-      total INTEGER NOT NULL,
-      remaining INTEGER NOT NULL,
-      created_at TEXT NOT NULL
-    )`,
-  );
-  db.run(
-    `CREATE TABLE IF NOT EXISTS pass_uses (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      pass_id INTEGER NOT NULL,
-      class_id INTEGER NOT NULL,
-      used_at TEXT NOT NULL,
-      FOREIGN KEY(pass_id) REFERENCES passes(id),
-      FOREIGN KEY(class_id) REFERENCES classes(id)
-    )`,
-  );
-  db.run("ALTER TABLE users ADD COLUMN phone TEXT", () => {});
-  db.run("ALTER TABLE users ADD COLUMN password_hash TEXT", () => {});
-  db.run("ALTER TABLE users ADD COLUMN password_salt TEXT", () => {});
-});
+let db = null;
+let pgPool = null;
+
+if (IS_POSTGRES) {
+  const sslEnabled =
+    String(process.env.DB_SSL || "true").toLowerCase() === "true";
+  pgPool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: sslEnabled ? { rejectUnauthorized: false } : false,
+  });
+
+  const runPg = (sql, params, cb) => {
+    let callback = cb;
+    let values = [];
+    if (typeof params === "function") {
+      callback = params;
+    } else if (Array.isArray(params)) {
+      values = params;
+    }
+    let normalized = normalizeSql(sql);
+    if (
+      /^\s*insert\s+/i.test(normalized) &&
+      !/\sreturning\s/i.test(normalized)
+    ) {
+      normalized = `${normalized} RETURNING id`;
+    }
+    pgPool
+      .query(normalized, values)
+      .then((result) => {
+        const ctx = {
+          lastID: result.rows[0] ? result.rows[0].id : null,
+          changes: result.rowCount,
+        };
+        if (callback) {
+          callback.call(ctx, null);
+        }
+      })
+      .catch((err) => {
+        if (callback) {
+          callback(err);
+        }
+      });
+  };
+
+  const selectPg = (sql, params, cb, many) => {
+    let callback = cb;
+    let values = [];
+    if (typeof params === "function") {
+      callback = params;
+    } else if (Array.isArray(params)) {
+      values = params;
+    }
+    pgPool
+      .query(normalizeSql(sql), values)
+      .then((result) => {
+        if (callback) {
+          callback(null, many ? result.rows : result.rows[0]);
+        }
+      })
+      .catch((err) => {
+        if (callback) {
+          callback(err);
+        }
+      });
+  };
+
+  db = {
+    run: runPg,
+    get: (sql, params, cb) => selectPg(sql, params, cb, false),
+    all: (sql, params, cb) => selectPg(sql, params, cb, true),
+    serialize: (fn) => fn(),
+    prepare: (sql) => ({
+      run: (...params) => runPg(sql, params),
+      finalize: () => {},
+    }),
+  };
+} else {
+  const DB_PATH = process.env.DB_PATH || path.join(__dirname, "data.db");
+  const dbDir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+  db = new sqlite3.Database(DB_PATH);
+}
+
+const initDb = async () => {
+  if (IS_POSTGRES && pgPool) {
+    await pgPool.query(
+      `CREATE TABLE IF NOT EXISTS classes (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        coach TEXT,
+        starts_at TEXT NOT NULL,
+        capacity INTEGER NOT NULL,
+        notes TEXT
+      )`,
+    );
+    await pgPool.query(
+      `CREATE TABLE IF NOT EXISTS signups (
+        id SERIAL PRIMARY KEY,
+        class_id INTEGER NOT NULL REFERENCES classes(id),
+        name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+      )`,
+    );
+    await pgPool.query(
+      `CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`,
+    );
+    await pgPool.query(
+      `CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        full_name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        birth_date TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        password_hash TEXT,
+        password_salt TEXT,
+        consent_text TEXT NOT NULL,
+        consent_accepted_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`,
+    );
+    await pgPool.query(
+      `CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id SERIAL PRIMARY KEY,
+        endpoint TEXT NOT NULL UNIQUE,
+        subscription TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`,
+    );
+    await pgPool.query(
+      `CREATE TABLE IF NOT EXISTS passes (
+        id SERIAL PRIMARY KEY,
+        user_email TEXT NOT NULL,
+        total INTEGER NOT NULL,
+        remaining INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      )`,
+    );
+    await pgPool.query(
+      `CREATE TABLE IF NOT EXISTS pass_uses (
+        id SERIAL PRIMARY KEY,
+        pass_id INTEGER NOT NULL REFERENCES passes(id),
+        class_id INTEGER NOT NULL REFERENCES classes(id),
+        used_at TEXT NOT NULL
+      )`,
+    );
+    return;
+  }
+
+  return new Promise((resolve) => {
+    db.serialize(() => {
+      db.run(
+        `CREATE TABLE IF NOT EXISTS classes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          coach TEXT,
+          starts_at TEXT NOT NULL,
+          capacity INTEGER NOT NULL,
+          notes TEXT
+        )`,
+      );
+      db.run(
+        `CREATE TABLE IF NOT EXISTS signups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          class_id INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          email TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          FOREIGN KEY(class_id) REFERENCES classes(id)
+        )`,
+      );
+      db.run(
+        `CREATE TABLE IF NOT EXISTS notifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT NOT NULL,
+          message TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )`,
+      );
+      db.run(
+        `CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          full_name TEXT NOT NULL,
+          email TEXT NOT NULL UNIQUE,
+          birth_date TEXT NOT NULL,
+          phone TEXT NOT NULL,
+          password_hash TEXT,
+          password_salt TEXT,
+          consent_text TEXT NOT NULL,
+          consent_accepted_at TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )`,
+      );
+      db.run(
+        `CREATE TABLE IF NOT EXISTS push_subscriptions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          endpoint TEXT NOT NULL UNIQUE,
+          subscription TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )`,
+      );
+      db.run(
+        `CREATE TABLE IF NOT EXISTS passes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_email TEXT NOT NULL,
+          total INTEGER NOT NULL,
+          remaining INTEGER NOT NULL,
+          created_at TEXT NOT NULL
+        )`,
+      );
+      db.run(
+        `CREATE TABLE IF NOT EXISTS pass_uses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          pass_id INTEGER NOT NULL,
+          class_id INTEGER NOT NULL,
+          used_at TEXT NOT NULL,
+          FOREIGN KEY(pass_id) REFERENCES passes(id),
+          FOREIGN KEY(class_id) REFERENCES classes(id)
+        )`,
+      );
+      db.run("ALTER TABLE users ADD COLUMN phone TEXT", () => {});
+      db.run("ALTER TABLE users ADD COLUMN password_hash TEXT", () => {});
+      db.run("ALTER TABLE users ADD COLUMN password_salt TEXT", () => {});
+      db.run("SELECT 1", () => resolve());
+    });
+  });
+};
 
 const hashPassword = (password, salt = null) => {
   const usedSalt = salt || crypto.randomBytes(16).toString("hex");
@@ -181,11 +348,10 @@ const createNotification = (type, message) => {
 const storePushSubscription = (subscription, callback) => {
   const createdAt = new Date().toISOString();
   const endpoint = subscription.endpoint;
-  db.run(
-    "INSERT OR REPLACE INTO push_subscriptions (endpoint, subscription, created_at) VALUES (?, ?, ?)",
-    [endpoint, JSON.stringify(subscription), createdAt],
-    callback,
-  );
+  const sql = IS_POSTGRES
+    ? "INSERT INTO push_subscriptions (endpoint, subscription, created_at) VALUES (?, ?, ?) ON CONFLICT (endpoint) DO UPDATE SET subscription = EXCLUDED.subscription, created_at = EXCLUDED.created_at"
+    : "INSERT OR REPLACE INTO push_subscriptions (endpoint, subscription, created_at) VALUES (?, ?, ?)";
+  db.run(sql, [endpoint, JSON.stringify(subscription), createdAt], callback);
 };
 
 const sendPushToAll = (title, body) => {
@@ -315,7 +481,7 @@ app.get("/api/classes", (req, res) => {
       SELECT COUNT(*) FROM signups s WHERE s.class_id = c.id AND s.status = 'confirmed'
     ) AS confirmed_count
     FROM classes c
-    ORDER BY datetime(c.starts_at) ASC`,
+    ORDER BY c.starts_at ASC`,
     [],
     (err, rows) => {
       if (err) {
@@ -465,7 +631,7 @@ app.post("/api/admin/telegram/test", requireAdmin, async (req, res) => {
 app.get("/api/passes/me", requireUser, (req, res) => {
   const { email } = req.session.user;
   db.get(
-    "SELECT * FROM passes WHERE user_email = ? ORDER BY datetime(created_at) DESC LIMIT 1",
+    "SELECT * FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
     [email],
     (err, passRow) => {
       if (err) {
@@ -479,7 +645,7 @@ app.get("/api/passes/me", requireUser, (req, res) => {
          FROM pass_uses pu
          JOIN classes c ON pu.class_id = c.id
          WHERE pu.pass_id = ?
-         ORDER BY datetime(pu.used_at) DESC`,
+         ORDER BY pu.used_at DESC`,
         [passRow.id],
         (useErr, useRows) => {
           if (useErr) {
@@ -534,7 +700,7 @@ app.post("/api/classes/:id/signup", requireUser, (req, res) => {
           return res.status(500).json({ error: "Database error" });
         }
         db.get(
-          "SELECT * FROM passes WHERE user_email = ? AND remaining > 0 ORDER BY datetime(created_at) DESC LIMIT 1",
+          "SELECT * FROM passes WHERE user_email = ? AND remaining > 0 ORDER BY created_at DESC LIMIT 1",
           [email],
           (passErr, passRow) => {
             if (!passErr && passRow) {
@@ -609,7 +775,7 @@ app.post("/api/signups/:id/cancel", requireUser, (req, res) => {
              FROM pass_uses pu
              JOIN passes p ON pu.pass_id = p.id
              WHERE p.user_email = ? AND pu.class_id = ?
-             ORDER BY datetime(pu.used_at) DESC
+             ORDER BY pu.used_at DESC
              LIMIT 1`,
             [email, row.class_id],
             (passErr, passUseRow) => {
@@ -637,6 +803,9 @@ app.post("/api/signups/:id/cancel", requireUser, (req, res) => {
                           "cancel",
                           `Lemondas: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
                         );
+                        sendTelegramMessage(
+                          `Lemondas: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
+                        );
                         return res.json({ status: "cancelled" });
                       },
                     );
@@ -646,6 +815,9 @@ app.post("/api/signups/:id/cancel", requireUser, (req, res) => {
               }
               createNotification(
                 "cancel",
+                `Lemondas: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
+              );
+              sendTelegramMessage(
                 `Lemondas: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
               );
               return res.json({ status: "cancelled" });
@@ -665,7 +837,7 @@ app.get("/api/signups/me", requireUser, (req, res) => {
      FROM signups s
      JOIN classes c ON s.class_id = c.id
      WHERE s.email = ?
-     ORDER BY datetime(c.starts_at) DESC`,
+    ORDER BY c.starts_at DESC`,
     [email],
     (err, rows) => {
       if (err) {
@@ -701,15 +873,21 @@ app.post("/api/admin/logout", (req, res) => {
 });
 
 app.post("/api/admin/classes/regenerate", requireAdmin, (req, res) => {
-  db.serialize(() => {
-    db.run("DELETE FROM signups");
-    db.run("DELETE FROM pass_uses");
-    db.run("DELETE FROM classes", (err) => {
-      if (err) {
+  db.run("DELETE FROM signups", (signupsErr) => {
+    if (signupsErr) {
+      return res.status(500).json({ error: "Database error" });
+    }
+    db.run("DELETE FROM pass_uses", (usesErr) => {
+      if (usesErr) {
         return res.status(500).json({ error: "Database error" });
       }
-      seedWeeklyClasses();
-      return res.json({ ok: true });
+      db.run("DELETE FROM classes", (classesErr) => {
+        if (classesErr) {
+          return res.status(500).json({ error: "Database error" });
+        }
+        seedWeeklyClasses();
+        return res.json({ ok: true });
+      });
     });
   });
 });
@@ -743,7 +921,7 @@ app.post("/api/admin/passes/assign", requireAdmin, (req, res) => {
 app.get("/api/admin/passes/:email", requireAdmin, (req, res) => {
   const email = req.params.email;
   db.get(
-    "SELECT * FROM passes WHERE user_email = ? ORDER BY datetime(created_at) DESC LIMIT 1",
+    "SELECT * FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
     [email],
     (err, passRow) => {
       if (err) {
@@ -757,7 +935,7 @@ app.get("/api/admin/passes/:email", requireAdmin, (req, res) => {
          FROM pass_uses pu
          JOIN classes c ON pu.class_id = c.id
          WHERE pu.pass_id = ?
-         ORDER BY datetime(pu.used_at) DESC`,
+         ORDER BY pu.used_at DESC`,
         [passRow.id],
         (useErr, useRows) => {
           if (useErr) {
@@ -804,7 +982,7 @@ app.post("/api/admin/passes/set", requireAdmin, (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
     db.get(
-      "SELECT id FROM passes WHERE user_email = ? ORDER BY datetime(created_at) DESC LIMIT 1",
+      "SELECT id FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
       [email],
       (findErr, passRow) => {
         if (findErr) {
@@ -853,7 +1031,7 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
     return res.status(400).json({ error: "Email and classId required" });
   }
   db.get(
-    "SELECT * FROM passes WHERE user_email = ? AND remaining > 0 ORDER BY datetime(created_at) DESC LIMIT 1",
+    "SELECT * FROM passes WHERE user_email = ? AND remaining > 0 ORDER BY created_at DESC LIMIT 1",
     [email],
     (err, passRow) => {
       if (err) {
@@ -926,16 +1104,12 @@ app.delete("/api/admin/passes/use/:id", requireAdmin, (req, res) => {
 });
 
 app.get("/api/admin/classes", requireAdmin, (req, res) => {
-  db.all(
-    "SELECT * FROM classes ORDER BY datetime(starts_at) ASC",
-    [],
-    (err, rows) => {
-      if (err) {
-        return res.status(500).json({ error: "Database error" });
-      }
-      return res.json(rows.map(mapClassRow));
-    },
-  );
+  db.all("SELECT * FROM classes ORDER BY starts_at ASC", [], (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: "Database error" });
+    }
+    return res.json(rows.map(mapClassRow));
+  });
 });
 
 app.post("/api/admin/classes", requireAdmin, (req, res) => {
@@ -994,7 +1168,7 @@ app.get("/api/admin/signups", requireAdmin, (req, res) => {
     `SELECT s.*, c.title AS class_title, c.starts_at AS class_starts
      FROM signups s
      JOIN classes c ON s.class_id = c.id
-     ORDER BY datetime(s.created_at) DESC`,
+    ORDER BY s.created_at DESC`,
     [],
     (err, rows) => {
       if (err) {
@@ -1101,7 +1275,7 @@ app.post("/api/admin/signups/:id/reject", requireAdmin, (req, res) => {
 
 app.get("/api/admin/notifications", requireAdmin, (req, res) => {
   db.all(
-    "SELECT * FROM notifications ORDER BY datetime(created_at) DESC LIMIT 20",
+    "SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20",
     [],
     (err, rows) => {
       if (err) {
@@ -1116,7 +1290,14 @@ app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-app.listen(PORT, () => {
-  seedWeeklyClasses();
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+initDb()
+  .then(() => {
+    seedWeeklyClasses();
+    app.listen(PORT, () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("Database init failed", err);
+    process.exit(1);
+  });
