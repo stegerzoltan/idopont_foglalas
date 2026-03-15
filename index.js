@@ -1,4 +1,5 @@
 require("dotenv").config();
+process.env.TZ = process.env.TZ || "Europe/Budapest";
 const path = require("path");
 const express = require("express");
 const session = require("express-session");
@@ -665,6 +666,20 @@ app.post("/api/admin/logout", (req, res) => {
   });
 });
 
+app.post("/api/admin/classes/regenerate", requireAdmin, (req, res) => {
+  db.serialize(() => {
+    db.run("DELETE FROM signups");
+    db.run("DELETE FROM pass_uses");
+    db.run("DELETE FROM classes", (err) => {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      seedWeeklyClasses();
+      return res.json({ ok: true });
+    });
+  });
+});
+
 app.post("/api/admin/passes/assign", requireAdmin, (req, res) => {
   const { email } = req.body;
   if (!email) {
@@ -688,6 +703,191 @@ app.post("/api/admin/passes/assign", requireAdmin, (req, res) => {
         return res.json({ id: this.lastID, total: 10, remaining: 10 });
       },
     );
+  });
+});
+
+app.get("/api/admin/passes/:email", requireAdmin, (req, res) => {
+  const email = req.params.email;
+  db.get(
+    "SELECT * FROM passes WHERE user_email = ? ORDER BY datetime(created_at) DESC LIMIT 1",
+    [email],
+    (err, passRow) => {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      if (!passRow) {
+        return res.json({ pass: null, uses: [] });
+      }
+      db.all(
+        `SELECT pu.id, pu.used_at, c.title, c.starts_at
+         FROM pass_uses pu
+         JOIN classes c ON pu.class_id = c.id
+         WHERE pu.pass_id = ?
+         ORDER BY datetime(pu.used_at) DESC`,
+        [passRow.id],
+        (useErr, useRows) => {
+          if (useErr) {
+            return res.status(500).json({ error: "Database error" });
+          }
+          return res.json({
+            pass: {
+              id: passRow.id,
+              total: passRow.total,
+              remaining: passRow.remaining,
+              createdAt: passRow.created_at,
+            },
+            uses: useRows.map((row) => ({
+              id: row.id,
+              usedAt: row.used_at,
+              title: row.title,
+              startsAt: row.starts_at,
+            })),
+          });
+        },
+      );
+    },
+  );
+});
+
+app.post("/api/admin/passes/set", requireAdmin, (req, res) => {
+  const { email, total, remaining } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: "Email required" });
+  }
+  const totalValue = Number(total);
+  const remainingValue = Number(remaining);
+  if (!Number.isFinite(totalValue) || totalValue < 0) {
+    return res.status(400).json({ error: "Invalid total" });
+  }
+  if (!Number.isFinite(remainingValue) || remainingValue < 0) {
+    return res.status(400).json({ error: "Invalid remaining" });
+  }
+  db.get("SELECT email FROM users WHERE email = ?", [email], (err, row) => {
+    if (err) {
+      return res.status(500).json({ error: "Database error" });
+    }
+    if (!row) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    db.get(
+      "SELECT id FROM passes WHERE user_email = ? ORDER BY datetime(created_at) DESC LIMIT 1",
+      [email],
+      (findErr, passRow) => {
+        if (findErr) {
+          return res.status(500).json({ error: "Database error" });
+        }
+        if (!passRow) {
+          const createdAt = new Date().toISOString();
+          db.run(
+            "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)",
+            [email, totalValue, remainingValue, createdAt],
+            function onInsert(insertErr) {
+              if (insertErr) {
+                return res.status(500).json({ error: "Database error" });
+              }
+              return res.json({
+                id: this.lastID,
+                total: totalValue,
+                remaining: remainingValue,
+              });
+            },
+          );
+          return;
+        }
+        db.run(
+          "UPDATE passes SET total = ?, remaining = ? WHERE id = ?",
+          [totalValue, remainingValue, passRow.id],
+          (updateErr) => {
+            if (updateErr) {
+              return res.status(500).json({ error: "Database error" });
+            }
+            return res.json({
+              id: passRow.id,
+              total: totalValue,
+              remaining: remainingValue,
+            });
+          },
+        );
+      },
+    );
+  });
+});
+
+app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
+  const { email, classId } = req.body;
+  if (!email || !classId) {
+    return res.status(400).json({ error: "Email and classId required" });
+  }
+  db.get(
+    "SELECT * FROM passes WHERE user_email = ? AND remaining > 0 ORDER BY datetime(created_at) DESC LIMIT 1",
+    [email],
+    (err, passRow) => {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      if (!passRow) {
+        return res.status(400).json({ error: "No active pass" });
+      }
+      db.get(
+        "SELECT id FROM classes WHERE id = ?",
+        [classId],
+        (classErr, classRow) => {
+          if (classErr) {
+            return res.status(500).json({ error: "Database error" });
+          }
+          if (!classRow) {
+            return res.status(404).json({ error: "Class not found" });
+          }
+          const usedAt = new Date().toISOString();
+          db.run(
+            "UPDATE passes SET remaining = remaining - 1 WHERE id = ?",
+            [passRow.id],
+            (updateErr) => {
+              if (updateErr) {
+                return res.status(500).json({ error: "Database error" });
+              }
+              db.run(
+                "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
+                [passRow.id, classId, usedAt],
+                function onInsert(insertErr) {
+                  if (insertErr) {
+                    return res.status(500).json({ error: "Database error" });
+                  }
+                  return res.json({ id: this.lastID });
+                },
+              );
+            },
+          );
+        },
+      );
+    },
+  );
+});
+
+app.delete("/api/admin/passes/use/:id", requireAdmin, (req, res) => {
+  const useId = Number(req.params.id);
+  db.get("SELECT pass_id FROM pass_uses WHERE id = ?", [useId], (err, row) => {
+    if (err) {
+      return res.status(500).json({ error: "Database error" });
+    }
+    if (!row) {
+      return res.status(404).json({ error: "Use not found" });
+    }
+    db.run("DELETE FROM pass_uses WHERE id = ?", [useId], (delErr) => {
+      if (delErr) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      db.run(
+        "UPDATE passes SET remaining = CASE WHEN remaining < total THEN remaining + 1 ELSE remaining END WHERE id = ?",
+        [row.pass_id],
+        (updateErr) => {
+          if (updateErr) {
+            return res.status(500).json({ error: "Database error" });
+          }
+          return res.json({ ok: true });
+        },
+      );
+    });
   });
 });
 

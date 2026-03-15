@@ -59,9 +59,17 @@ const closeSignups = document.getElementById("close-signups");
 const signupsList = document.getElementById("signups-list");
 const dayMenu = document.getElementById("day-menu");
 const scrollTopButton = document.getElementById("scroll-top");
-const passEmailInput = document.getElementById("pass-email");
+const passAdminEmail = document.getElementById("pass-admin-email");
+const loadPassAdminButton = document.getElementById("load-pass-admin");
 const assignPassButton = document.getElementById("assign-pass");
+const passTotalInput = document.getElementById("pass-total");
+const passRemainingInput = document.getElementById("pass-remaining");
+const savePassAdminButton = document.getElementById("save-pass-admin");
+const passClassSelect = document.getElementById("pass-class-select");
+const addPassUseButton = document.getElementById("add-pass-use");
+const passUsesAdmin = document.getElementById("pass-uses-admin");
 const passAdminStatus = document.getElementById("pass-admin-status");
+const regenClassesButton = document.getElementById("regen-classes");
 
 let currentUser = null;
 let lastClasses = [];
@@ -70,6 +78,7 @@ let mySignupByClass = new Map();
 let mySignupsCache = [];
 let authMode = "login";
 let lastViewportWidth = window.innerWidth;
+let adminClassesCache = [];
 
 const WEEK_DAYS = [
   { key: 1, label: "Hétfő" },
@@ -126,6 +135,19 @@ const normalizePhone = (value) => {
     return "+36";
   }
   return `+36${digits}`;
+};
+
+const normalizeBirthDate = (value) => {
+  const digits = String(value || "")
+    .replace(/\D/g, "")
+    .slice(0, 8);
+  if (digits.length <= 4) {
+    return digits;
+  }
+  if (digits.length <= 6) {
+    return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  }
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
 };
 
 const urlBase64ToUint8Array = (base64String) => {
@@ -693,6 +715,8 @@ const loadAdminData = async () => {
   const classes = await classesResponse.json();
   const signups = await signupsResponse.json();
   const notifications = await notificationsResponse.json();
+  adminClassesCache = classes;
+  updatePassClassOptions();
   renderAdminClasses(classes);
   renderSignups(signups);
   renderNotifications(notifications);
@@ -701,6 +725,149 @@ const loadAdminData = async () => {
   if (adminPill) {
     adminPill.hidden = false;
   }
+};
+
+const updatePassClassOptions = () => {
+  if (!passClassSelect) {
+    return;
+  }
+  passClassSelect.innerHTML = "";
+  adminClassesCache.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = String(item.id);
+    option.textContent = `${item.title} - ${formatDate(item.startsAt)}`;
+    passClassSelect.appendChild(option);
+  });
+};
+
+const renderAdminPass = (data) => {
+  if (!passUsesAdmin || !passTotalInput || !passRemainingInput) {
+    return;
+  }
+  passUsesAdmin.innerHTML = "";
+  if (!data || !data.pass) {
+    passTotalInput.value = "";
+    passRemainingInput.value = "";
+    passUsesAdmin.innerHTML = '<div class="notice">Nincs aktív bérlet.</div>';
+    return;
+  }
+  passTotalInput.value = String(data.pass.total);
+  passRemainingInput.value = String(data.pass.remaining);
+  if (!data.uses || data.uses.length === 0) {
+    passUsesAdmin.innerHTML =
+      '<div class="notice">Nincs még levont alkalom.</div>';
+    return;
+  }
+  data.uses.forEach((use) => {
+    const row = document.createElement("div");
+    row.className = "notice";
+    row.innerHTML = `
+      <strong>${use.title}</strong><br />
+      ${formatDate(use.startsAt)}
+    `;
+    const removeButton = document.createElement("button");
+    removeButton.className = "ghost";
+    removeButton.textContent = "Alkalom torlese";
+    removeButton.addEventListener("click", () => deletePassUse(use.id));
+    row.appendChild(removeButton);
+    passUsesAdmin.appendChild(row);
+  });
+};
+
+const loadAdminPass = async () => {
+  if (!passAdminEmail || !passAdminStatus) {
+    return;
+  }
+  const email = passAdminEmail.value.trim();
+  if (!email) {
+    passAdminStatus.textContent = "Email megadasa kotelezo.";
+    return;
+  }
+  passAdminStatus.textContent = "";
+  const response = await fetch(
+    `/api/admin/passes/${encodeURIComponent(email)}`,
+  );
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    passAdminStatus.textContent = err.error || "Nem sikerult betolteni.";
+    return;
+  }
+  const data = await response.json();
+  renderAdminPass(data);
+};
+
+const saveAdminPass = async () => {
+  if (!passAdminEmail || !passTotalInput || !passRemainingInput) {
+    return;
+  }
+  const email = passAdminEmail.value.trim();
+  if (!email) {
+    passAdminStatus.textContent = "Email megadasa kotelezo.";
+    return;
+  }
+  const total = passTotalInput.value;
+  const remaining = passRemainingInput.value;
+  const response = await fetch("/api/admin/passes/set", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, total, remaining }),
+  });
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    passAdminStatus.textContent = err.error || "Nem sikerult menteni.";
+    return;
+  }
+  passAdminStatus.textContent = "Berlet frissitve.";
+  await loadAdminPass();
+};
+
+const addPassUse = async () => {
+  if (!passAdminEmail || !passClassSelect) {
+    return;
+  }
+  const email = passAdminEmail.value.trim();
+  const classId = passClassSelect.value;
+  if (!email || !classId) {
+    passAdminStatus.textContent = "Email es ora kivalasztasa kotelezo.";
+    return;
+  }
+  const response = await fetch("/api/admin/passes/use", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, classId }),
+  });
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    passAdminStatus.textContent = err.error || "Nem sikerult menteni.";
+    return;
+  }
+  passAdminStatus.textContent = "Alkalom hozzaadva.";
+  await loadAdminPass();
+};
+
+const deletePassUse = async (useId) => {
+  const response = await fetch(`/api/admin/passes/use/${useId}`, {
+    method: "DELETE",
+  });
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    passAdminStatus.textContent = err.error || "Nem sikerult torolni.";
+    return;
+  }
+  passAdminStatus.textContent = "Alkalom torolve.";
+  await loadAdminPass();
 };
 
 const handleAdminUnauthorized = (response) => {
@@ -901,7 +1068,7 @@ userLoginForm.addEventListener("submit", async (event) => {
         fullName: userFullName ? userFullName.value.trim() : "",
         email: emailValue,
         password: passwordValue,
-        birthDate: userBirthDate ? userBirthDate.value : "",
+        birthDate: userBirthDate ? normalizeBirthDate(userBirthDate.value) : "",
         phone: userPhone ? userPhone.value.trim() : "",
         consentText: consentText ? consentText.innerText : "",
         consentAccepted: userConsent ? userConsent.checked : false,
@@ -1003,6 +1170,65 @@ adminLogout.addEventListener("click", async () => {
   if (adminPill) {
     adminPill.hidden = true;
   }
+});
+
+loadPassAdminButton?.addEventListener("click", () => {
+  loadAdminPass();
+});
+
+assignPassButton?.addEventListener("click", async () => {
+  if (!passAdminEmail || !passAdminStatus) {
+    return;
+  }
+  passAdminStatus.textContent = "";
+  const email = passAdminEmail.value.trim();
+  if (!email) {
+    passAdminStatus.textContent = "Email megadasa kotelezo.";
+    return;
+  }
+  const response = await fetch("/api/admin/passes/assign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    passAdminStatus.textContent =
+      err.error || "Nem sikerult a berletet rogziteni.";
+    return;
+  }
+  passAdminStatus.textContent = "Berlet rogzitve.";
+  passTotalInput.value = "10";
+  passRemainingInput.value = "10";
+  await loadAdminPass();
+});
+
+savePassAdminButton?.addEventListener("click", () => {
+  saveAdminPass();
+});
+
+addPassUseButton?.addEventListener("click", () => {
+  addPassUse();
+});
+
+regenClassesButton?.addEventListener("click", async () => {
+  classMessage.textContent = "";
+  const response = await fetch("/api/admin/classes/regenerate", {
+    method: "POST",
+  });
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    classMessage.textContent = "Nem sikerult ujrageneralni.";
+    return;
+  }
+  classMessage.textContent = "Orak ujrageneralva.";
+  await loadAdminData();
+  await loadClasses();
 });
 
 openUser.addEventListener("click", async () => {
@@ -1121,6 +1347,13 @@ userPhone?.addEventListener("input", () => {
   const normalized = normalizePhone(userPhone.value);
   if (userPhone.value !== normalized) {
     userPhone.value = normalized;
+  }
+});
+
+userBirthDate?.addEventListener("input", () => {
+  const normalized = normalizeBirthDate(userBirthDate.value);
+  if (userBirthDate.value !== normalized) {
+    userBirthDate.value = normalized;
   }
 });
 

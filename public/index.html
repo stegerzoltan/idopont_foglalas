@@ -159,12 +159,23 @@
           </div>
 
           <div class="notice pass-panel">
-            <strong>Bérlet rögzítése</strong>
-            <p class="helper">10 alkalmas bérlet hozzáadása felhasználóhoz.</p>
+            <strong>Bérlet kezelés</strong>
+            <p class="helper">Bérlet állapot és alkalmak admin módosítás.</p>
             <div class="form-actions">
-              <input type="email" id="pass-email" placeholder="user@email" />
-              <button type="button" class="primary" id="assign-pass">Bérlet rögzítése</button>
+              <input type="email" id="pass-admin-email" placeholder="user@email" />
+              <button type="button" class="ghost" id="load-pass-admin">Betöltés</button>
+              <button type="button" class="primary" id="assign-pass">Új 10 alkalmas</button>
             </div>
+            <div class="form-actions">
+              <input type="number" id="pass-total" min="0" placeholder="Összes" />
+              <input type="number" id="pass-remaining" min="0" placeholder="Maradék" />
+              <button type="button" class="primary" id="save-pass-admin">Mentés</button>
+            </div>
+            <div class="form-actions">
+              <select id="pass-class-select"></select>
+              <button type="button" class="ghost" id="add-pass-use">Alkalom hozzáadása</button>
+            </div>
+            <div class="stack" id="pass-uses-admin"></div>
             <p class="helper" id="pass-admin-status"></p>
           </div>
 
@@ -193,6 +204,7 @@
             <div class="form-actions span-2">
               <button type="submit" class="primary" id="save-class">Mentem</button>
               <button type="button" class="ghost" id="reset-class">Új óra</button>
+              <button type="button" class="ghost" id="regen-classes">Órák újragenerálása</button>
             </div>
             <p class="helper span-2" id="class-message"></p>
           </form>
