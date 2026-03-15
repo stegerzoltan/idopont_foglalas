@@ -1155,12 +1155,94 @@ app.put("/api/admin/classes/:id", requireAdmin, (req, res) => {
 
 app.delete("/api/admin/classes/:id", requireAdmin, (req, res) => {
   const classId = Number(req.params.id);
-  db.run("DELETE FROM classes WHERE id = ?", [classId], function onDelete(err) {
-    if (err) {
-      return res.status(500).json({ error: "Database error" });
-    }
-    return res.json({ deleted: this.changes });
-  });
+  db.get(
+    "SELECT title, starts_at FROM classes WHERE id = ?",
+    [classId],
+    (classErr, classRow) => {
+      if (classErr) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      if (!classRow) {
+        return res.status(404).json({ error: "Class not found" });
+      }
+      db.all(
+        "SELECT id FROM signups WHERE class_id = ?",
+        [classId],
+        (signupsErr, signupRows) => {
+          if (signupsErr) {
+            return res.status(500).json({ error: "Database error" });
+          }
+          db.all(
+            "SELECT pass_id FROM pass_uses WHERE class_id = ?",
+            [classId],
+            (usesErr, useRows) => {
+              if (usesErr) {
+                return res.status(500).json({ error: "Database error" });
+              }
+              const refundNext = (index) => {
+                if (index >= useRows.length) {
+                  return cleanupAfterRefunds();
+                }
+                const passId = useRows[index].pass_id;
+                db.run(
+                  "UPDATE passes SET remaining = remaining + 1 WHERE id = ?",
+                  [passId],
+                  (refundErr) => {
+                    if (refundErr) {
+                      return res.status(500).json({ error: "Database error" });
+                    }
+                    return refundNext(index + 1);
+                  },
+                );
+              };
+
+              const cleanupAfterRefunds = () => {
+                db.run(
+                  "DELETE FROM pass_uses WHERE class_id = ?",
+                  [classId],
+                  (delUsesErr) => {
+                    if (delUsesErr) {
+                      return res.status(500).json({ error: "Database error" });
+                    }
+                    db.run(
+                      "DELETE FROM signups WHERE class_id = ?",
+                      [classId],
+                      (delSignupsErr) => {
+                        if (delSignupsErr) {
+                          return res
+                            .status(500)
+                            .json({ error: "Database error" });
+                        }
+                        db.run(
+                          "DELETE FROM classes WHERE id = ?",
+                          [classId],
+                          function onDelete(err) {
+                            if (err) {
+                              return res
+                                .status(500)
+                                .json({ error: "Database error" });
+                            }
+                            if (signupRows.length > 0) {
+                              const message = `Lemondas: Ora torolve - ${classRow.title} (${classRow.starts_at}) - ${signupRows.length} feliratkozas`;
+                              createNotification("cancel", message);
+                              sendTelegramMessage(message);
+                            }
+                            return res.json({ deleted: this.changes });
+                          },
+                        );
+                      },
+                    );
+                  },
+                );
+              };
+
+              return refundNext(0);
+            },
+          );
+        },
+      );
+    },
+  );
 });
 
 app.get("/api/admin/signups", requireAdmin, (req, res) => {
