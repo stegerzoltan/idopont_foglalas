@@ -30,6 +30,8 @@ const adminLoginMessage = document.getElementById("admin-login-message");
 const adminPanel = document.getElementById("admin-panel");
 const enablePushButton = document.getElementById("enable-push");
 const pushStatus = document.getElementById("push-status");
+const testTelegramButton = document.getElementById("test-telegram");
+const telegramStatus = document.getElementById("telegram-status");
 const closeSignup = document.getElementById("close-signup");
 const closeUser = document.getElementById("close-user");
 const closeAdmin = document.getElementById("close-admin");
@@ -967,10 +969,16 @@ const setAuthMode = (mode) => {
 
 const fillClassForm = (item) => {
   classIdInput.value = item.id;
-  classTitleInput.value = item.title;
-  classCoachInput.value = item.coach || "";
+  if (classTitleInput) {
+    classTitleInput.value = item.title;
+  }
+  if (classCoachInput) {
+    classCoachInput.value = item.coach || "";
+  }
   classStartsInput.value = item.startsAt.slice(0, 16);
-  classCapacityInput.value = item.capacity;
+  if (classCapacityInput) {
+    classCapacityInput.value = item.capacity;
+  }
   classNotesInput.value = item.notes || "";
   classMessage.textContent = "Szerkesztés betöltve.";
   const modalContent = adminModal.querySelector(".modal-content");
@@ -981,10 +989,16 @@ const fillClassForm = (item) => {
 
 const resetClassForm = () => {
   classIdInput.value = "";
-  classTitleInput.value = "";
-  classCoachInput.value = "";
+  if (classTitleInput) {
+    classTitleInput.value = "";
+  }
+  if (classCoachInput) {
+    classCoachInput.value = "";
+  }
   classStartsInput.value = "";
-  classCapacityInput.value = "";
+  if (classCapacityInput) {
+    classCapacityInput.value = "";
+  }
   classNotesInput.value = "";
   classMessage.textContent = "";
 };
@@ -1128,10 +1142,10 @@ classForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   classMessage.textContent = "";
   const payload = {
-    title: classTitleInput.value.trim(),
-    coach: classCoachInput.value.trim(),
+    title: classTitleInput ? classTitleInput.value.trim() : "Edzes",
+    coach: classCoachInput ? classCoachInput.value.trim() : "",
     startsAt: classStartsInput.value,
-    capacity: Number(classCapacityInput.value),
+    capacity: classCapacityInput ? Number(classCapacityInput.value) : 9999,
     notes: classNotesInput.value.trim(),
   };
 
@@ -1274,6 +1288,22 @@ enablePushButton?.addEventListener("click", () => {
       pushStatus.textContent = "Hiba történt az értesítés beállításakor.";
     }
   });
+});
+
+testTelegramButton?.addEventListener("click", async () => {
+  if (!telegramStatus) {
+    return;
+  }
+  telegramStatus.textContent = "Kuldem a teszt uzenetet...";
+  const response = await fetch("/api/admin/telegram/test", {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    telegramStatus.textContent = err.error || "Nem sikerult a Telegram teszt.";
+    return;
+  }
+  telegramStatus.textContent = "Telegram teszt elkuldve.";
 });
 
 closeSignup.addEventListener("click", () => closeModal(signupModal));

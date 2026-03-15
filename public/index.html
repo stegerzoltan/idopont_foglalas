@@ -151,12 +151,6 @@
             <button id="admin-logout" class="ghost">Kijelentkezés</button>
           </div>
 
-          <div class="notice push-panel">
-            <strong>Telefonos értesítés</strong>
-            <p class="helper">Kapj értesítést, ha új feliratkozás érkezik.</p>
-            <button type="button" class="primary" id="enable-push">Értesítés bekapcsolása</button>
-            <p class="helper" id="push-status"></p>
-          </div>
 
           <div class="notice pass-panel">
             <strong>Bérlet kezelés</strong>
@@ -182,20 +176,8 @@
           <form id="class-form" class="class-form">
             <input type="hidden" id="class-id" />
             <label>
-              Óra neve
-              <input type="text" id="class-title" required />
-            </label>
-            <label>
-              Edző
-              <input type="text" id="class-coach" />
-            </label>
-            <label>
               Kezdés
               <input type="datetime-local" id="class-starts" required />
-            </label>
-            <label>
-              Létszám
-              <input type="number" id="class-capacity" min="1" required />
             </label>
             <label class="span-2">
               Megjegyzés

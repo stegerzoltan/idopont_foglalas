@@ -12,6 +12,8 @@ const PORT = process.env.PORT || 3000;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@example.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || `mailto:${ADMIN_EMAIL}`;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 let vapidKeys = {
   publicKey: process.env.VAPID_PUBLIC_KEY,
   privateKey: process.env.VAPID_PRIVATE_KEY,
@@ -211,6 +213,27 @@ const sendPushToAll = (title, body) => {
   });
 };
 
+const sendTelegramMessage = async (message) => {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+    return;
+  }
+  try {
+    await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: TELEGRAM_CHAT_ID,
+          text: message,
+        }),
+      },
+    );
+  } catch (err) {
+    console.warn("Telegram send failed", err.message || err);
+  }
+};
+
 const WEEK_DAYS = [
   { key: 1, label: "Monday" },
   { key: 2, label: "Tuesday" },
@@ -277,7 +300,7 @@ const seedWeeklyClasses = () => {
           const startsAt = new Date(weekStart);
           startsAt.setDate(weekStart.getDate() + (day.key - 1));
           startsAt.setHours(hour, minute, 0, 0);
-          stmt.run("Edzes", "Zoltan", startsAt.toISOString(), 20, "");
+          stmt.run("Edzes", "Zoltan", startsAt.toISOString(), 9999, "");
         });
       });
 
@@ -431,6 +454,14 @@ app.post("/api/push/subscribe", requireAdmin, (req, res) => {
   });
 });
 
+app.post("/api/admin/telegram/test", requireAdmin, async (req, res) => {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+    return res.status(400).json({ error: "Telegram not configured" });
+  }
+  await sendTelegramMessage("Telegram teszt uzenet: mukodik az ertesites.");
+  return res.json({ ok: true });
+});
+
 app.get("/api/passes/me", requireUser, (req, res) => {
   const { email } = req.session.user;
   db.get(
@@ -523,6 +554,9 @@ app.post("/api/classes/:id/signup", requireUser, (req, res) => {
             sendPushToAll(
               "Uj feliratkozas",
               `${fullName} (${email}) - ${classRow.title}`,
+            );
+            sendTelegramMessage(
+              `Uj feliratkozas: ${fullName} (${email}) - ${classRow.title} (${classRow.starts_at})`,
             );
             return res.json({
               id: this.lastID,
@@ -906,14 +940,15 @@ app.get("/api/admin/classes", requireAdmin, (req, res) => {
 
 app.post("/api/admin/classes", requireAdmin, (req, res) => {
   const { title, coach, startsAt, capacity, notes } = req.body;
-  if (!title || !startsAt || !capacity) {
-    return res
-      .status(400)
-      .json({ error: "Title, startsAt, capacity required" });
+  if (!title || !startsAt) {
+    return res.status(400).json({ error: "Title and startsAt required" });
   }
+  const capacityValue = Number.isFinite(Number(capacity))
+    ? Number(capacity)
+    : 9999;
   db.run(
     "INSERT INTO classes (title, coach, starts_at, capacity, notes) VALUES (?, ?, ?, ?, ?)",
-    [title, coach || "", startsAt, Number(capacity), notes || ""],
+    [title, coach || "", startsAt, capacityValue, notes || ""],
     function onInsert(err) {
       if (err) {
         return res.status(500).json({ error: "Database error" });
@@ -926,14 +961,15 @@ app.post("/api/admin/classes", requireAdmin, (req, res) => {
 app.put("/api/admin/classes/:id", requireAdmin, (req, res) => {
   const classId = Number(req.params.id);
   const { title, coach, startsAt, capacity, notes } = req.body;
-  if (!title || !startsAt || !capacity) {
-    return res
-      .status(400)
-      .json({ error: "Title, startsAt, capacity required" });
+  if (!title || !startsAt) {
+    return res.status(400).json({ error: "Title and startsAt required" });
   }
+  const capacityValue = Number.isFinite(Number(capacity))
+    ? Number(capacity)
+    : 9999;
   db.run(
     "UPDATE classes SET title = ?, coach = ?, starts_at = ?, capacity = ?, notes = ? WHERE id = ?",
-    [title, coach || "", startsAt, Number(capacity), notes || "", classId],
+    [title, coach || "", startsAt, capacityValue, notes || "", classId],
     function onUpdate(err) {
       if (err) {
         return res.status(500).json({ error: "Database error" });
