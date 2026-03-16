@@ -268,21 +268,19 @@ const isPastDay = (date) => {
   return date < midnight;
 };
 
-const renderDayMenu = (weekDays, availableDayKeys) => {
+const renderDayMenu = (weekDays) => {
   if (!dayMenu) {
     return;
   }
   dayMenu.innerHTML = "";
   weekDays.forEach((day) => {
-    if (availableDayKeys && !availableDayKeys.has(day.key)) {
-      return;
-    }
-    if (isPastDay(day.date)) {
-      return;
-    }
     const button = document.createElement("button");
     button.textContent = day.label;
     button.dataset.dayKey = String(day.key);
+    if (isPastDay(day.date)) {
+      button.classList.add("is-past");
+      button.disabled = true;
+    }
     button.addEventListener("click", () => {
       const target = document.getElementById(`day-${day.key}`);
       if (target) {
@@ -371,23 +369,17 @@ const renderCalendarGrid = (classes) => {
   const weekStart = getDisplayWeekStart();
   const weekDays = buildWeekDaysWithDates(weekStart);
   const classMap = buildClassMap(classes, weekStart);
-  const availableDayKeys = new Set(
-    Array.from(classMap.keys()).map((key) => Number(key.split("-")[0])),
-  );
-  const visibleDays = weekDays.filter((day) => availableDayKeys.has(day.key));
-  renderDayMenu(weekDays, availableDayKeys);
-  classList.style.gridTemplateColumns = `90px repeat(${Math.max(
-    visibleDays.length,
-    1,
-  )}, minmax(160px, 1fr))`;
+  renderDayMenu(weekDays);
+  classList.style.gridTemplateColumns = `90px repeat(${weekDays.length}, minmax(160px, 1fr))`;
 
   const emptyHeader = document.createElement("div");
   emptyHeader.className = "calendar-header";
   classList.appendChild(emptyHeader);
 
-  visibleDays.forEach((day) => {
+  weekDays.forEach((day) => {
     const header = document.createElement("div");
     header.className = "calendar-header";
+    header.id = `day-${day.key}`;
     header.textContent = `${day.label} · ${day.dateLabel}`;
     classList.appendChild(header);
   });
@@ -398,7 +390,7 @@ const renderCalendarGrid = (classes) => {
     timeCell.textContent = time;
     classList.appendChild(timeCell);
 
-    visibleDays.forEach((day) => {
+    weekDays.forEach((day) => {
       const slot = buildSlot(day, time, classMap.get(`${day.key}-${time}`));
       if (slot) {
         classList.appendChild(slot);
@@ -411,51 +403,10 @@ const renderCalendarGrid = (classes) => {
   });
 };
 
-const renderCalendarMobile = (classes) => {
-  classList.className = "calendar mobile";
-  classList.innerHTML = "";
-  const weekStart = getDisplayWeekStart();
-  const weekDays = buildWeekDaysWithDates(weekStart);
-  const classMap = buildClassMap(classes, weekStart);
-  const availableDayKeys = new Set(
-    Array.from(classMap.keys()).map((key) => Number(key.split("-")[0])),
-  );
-  renderDayMenu(weekDays, availableDayKeys);
-
-  weekDays.forEach((day) => {
-    if (!availableDayKeys.has(day.key)) {
-      return;
-    }
-    const group = document.createElement("div");
-    group.className = "day-group";
-    group.id = `day-${day.key}`;
-    group.dataset.dayKey = String(day.key);
-    if (isPastDay(day.date)) {
-      group.classList.add("is-past");
-    }
-    const title = document.createElement("h4");
-    title.textContent = `${day.label} · ${day.dateLabel}`;
-    group.appendChild(title);
-
-    TIME_SLOTS.forEach((time) => {
-      const slot = buildSlot(day, time, classMap.get(`${day.key}-${time}`));
-      if (slot) {
-        group.appendChild(slot);
-      }
-    });
-
-    classList.appendChild(group);
-  });
-};
-
 const renderClasses = (classes) => {
   lastClasses = classes;
   updateWeekTitle();
-  if (window.matchMedia("(max-width: 720px)").matches) {
-    renderCalendarMobile(classes);
-  } else {
-    renderCalendarGrid(classes);
-  }
+  renderCalendarGrid(classes);
 };
 
 const renderAdminClasses = (classes) => {
