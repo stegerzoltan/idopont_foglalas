@@ -71,7 +71,10 @@ const passClassSelect = document.getElementById("pass-class-select");
 const addPassUseButton = document.getElementById("add-pass-use");
 const passUsesAdmin = document.getElementById("pass-uses-admin");
 const passAdminStatus = document.getElementById("pass-admin-status");
-const regenClassesButton = document.getElementById("regen-classes");
+const availabilityClassSelect = document.getElementById("availability-class");
+const setUnavailableButton = document.getElementById("set-unavailable");
+const setAvailableButton = document.getElementById("set-available");
+const availabilityStatus = document.getElementById("availability-status");
 
 let currentUser = null;
 let lastClasses = [];
@@ -343,10 +346,13 @@ const buildSlot = (day, time, item) => {
   if (diffHours > 0 && diffHours <= 2) {
     badges.push('<span class="badge badge--soon">Hamarosan indul</span>');
   }
+  const names = Array.isArray(item.confirmedNames) ? item.confirmedNames : [];
+  const namesText = names.length ? names.join(", ") : "Nincs feliratkozó";
   slot.innerHTML = `
     <div class="slot-time">${time}</div>
     ${badges.length ? `<div class="slot-badges">${badges.join("")}</div>` : ""}
     <div class="slot-meta">Feliratkozott: ${item.confirmedCount} fő</div>
+    <div class="slot-names">${namesText}</div>
   `;
 
   const button = document.createElement("button");
@@ -354,6 +360,11 @@ const buildSlot = (day, time, item) => {
     button.className = "ghost";
     button.textContent = "Időpont törlése";
     button.addEventListener("click", () => cancelSignup(mySignupId));
+  } else if (item.isActive === false) {
+    button.className = "ghost";
+    button.textContent = "Nem elérhető";
+    button.disabled = true;
+    slot.classList.add("slot-closed");
   } else {
     button.className = "primary signup-button";
     button.textContent = "Feliratkozom";
@@ -670,6 +681,7 @@ const loadAdminData = async () => {
   const notifications = await notificationsResponse.json();
   adminClassesCache = classes;
   updatePassClassOptions();
+  updateAvailabilityOptions();
   renderAdminClasses(classes);
   renderSignups(signups);
   renderNotifications(notifications);
@@ -690,6 +702,21 @@ const updatePassClassOptions = () => {
     option.value = String(item.id);
     option.textContent = `${item.title} - ${formatDate(item.startsAt)}`;
     passClassSelect.appendChild(option);
+  });
+};
+
+const updateAvailabilityOptions = () => {
+  if (!availabilityClassSelect) {
+    return;
+  }
+  availabilityClassSelect.innerHTML = "";
+  adminClassesCache.forEach((item) => {
+    const option = document.createElement("option");
+    const statusLabel =
+      item.isActive === false ? "(nem elérhető)" : "(elérhető)";
+    option.value = String(item.id);
+    option.textContent = `${formatDate(item.startsAt)} ${statusLabel}`;
+    availabilityClassSelect.appendChild(option);
   });
 };
 
@@ -1179,21 +1206,41 @@ addPassUseButton?.addEventListener("click", () => {
   addPassUse();
 });
 
-regenClassesButton?.addEventListener("click", async () => {
-  classMessage.textContent = "";
-  const response = await fetch("/api/admin/classes/regenerate", {
+const setClassAvailability = async (isActive) => {
+  if (!availabilityClassSelect || !availabilityStatus) {
+    return;
+  }
+  const classId = availabilityClassSelect.value;
+  if (!classId) {
+    availabilityStatus.textContent = "Valassz egy orat.";
+    return;
+  }
+  availabilityStatus.textContent = "";
+  const response = await fetch(`/api/admin/classes/${classId}/availability`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ isActive }),
   });
   if (handleAdminUnauthorized(response)) {
     return;
   }
   if (!response.ok) {
-    classMessage.textContent = "Nem sikerult ujrageneralni.";
+    availabilityStatus.textContent = "Nem sikerult frissiteni.";
     return;
   }
-  classMessage.textContent = "Orak ujrageneralva.";
+  availabilityStatus.textContent = isActive
+    ? "Ora elerhetove teve."
+    : "Ora nem elerheto.";
   await loadAdminData();
   await loadClasses();
+};
+
+setUnavailableButton?.addEventListener("click", () => {
+  setClassAvailability(false);
+});
+
+setAvailableButton?.addEventListener("click", () => {
+  setClassAvailability(true);
 });
 
 openUser.addEventListener("click", async () => {

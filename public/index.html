@@ -183,10 +183,20 @@
             <div class="form-actions span-2">
               <button type="submit" class="primary" id="save-class">Mentem</button>
               <button type="button" class="ghost" id="reset-class">Új óra</button>
-              <button type="button" class="ghost" id="regen-classes">Órák újragenerálása</button>
             </div>
             <p class="helper span-2" id="class-message"></p>
           </form>
+
+          <div class="notice availability-panel">
+            <strong>Óra elérhetőség</strong>
+            <p class="helper">Válassz órát, és állítsd elérhetővé vagy nem elérhetővé.</p>
+            <div class="form-actions">
+              <select id="availability-class"></select>
+              <button type="button" class="ghost" id="set-unavailable">Nem elérhető</button>
+              <button type="button" class="primary" id="set-available">Elérhető</button>
+            </div>
+            <p class="helper" id="availability-status"></p>
+          </div>
 
           <h4 class="section-title">Értesítések</h4>
           <div id="admin-notifications" class="stack"></div>

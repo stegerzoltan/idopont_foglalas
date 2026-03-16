@@ -153,8 +153,12 @@ const initDb = async () => {
         coach TEXT,
         starts_at TEXT NOT NULL,
         capacity INTEGER NOT NULL,
-        notes TEXT
+        notes TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1
       )`,
+    );
+    await pgPool.query(
+      "ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1",
     );
     await pgPool.query(
       `CREATE TABLE IF NOT EXISTS signups (
@@ -225,7 +229,8 @@ const initDb = async () => {
           coach TEXT,
           starts_at TEXT NOT NULL,
           capacity INTEGER NOT NULL,
-          notes TEXT
+          notes TEXT,
+          is_active INTEGER NOT NULL DEFAULT 1
         )`,
       );
       db.run(
@@ -291,6 +296,10 @@ const initDb = async () => {
       db.run("ALTER TABLE users ADD COLUMN phone TEXT", () => {});
       db.run("ALTER TABLE users ADD COLUMN password_hash TEXT", () => {});
       db.run("ALTER TABLE users ADD COLUMN password_salt TEXT", () => {});
+      db.run(
+        "ALTER TABLE classes ADD COLUMN is_active INTEGER DEFAULT 1",
+        () => {},
+      );
       db.run("SELECT 1", () => resolve());
     });
   });
@@ -335,6 +344,7 @@ const mapClassRow = (row) => ({
   startsAt: row.starts_at,
   capacity: row.capacity,
   notes: row.notes,
+  isActive: row.is_active === 1 || row.is_active === true,
 });
 
 const createNotification = (type, message) => {
@@ -487,12 +497,40 @@ app.get("/api/classes", (req, res) => {
       if (err) {
         return res.status(500).json({ error: "Database error" });
       }
-      const payload = rows.map((row) => ({
-        ...mapClassRow(row),
-        confirmedCount: row.confirmed_count,
-        spotsLeft: Math.max(0, row.capacity - row.confirmed_count),
-      }));
-      return res.json(payload);
+      if (!rows || rows.length === 0) {
+        return res.json([]);
+      }
+      const classIds = rows.map((row) => row.id);
+      const placeholders = classIds.map(() => "?").join(",");
+      db.all(
+        `SELECT class_id, name
+         FROM signups
+         WHERE status = 'confirmed' AND class_id IN (${placeholders})
+         ORDER BY created_at ASC`,
+        classIds,
+        (signErr, signRows) => {
+          if (signErr) {
+            return res.status(500).json({ error: "Database error" });
+          }
+          const namesByClass = new Map();
+          signRows.forEach((row) => {
+            if (!namesByClass.has(row.class_id)) {
+              namesByClass.set(row.class_id, []);
+            }
+            namesByClass.get(row.class_id).push(row.name);
+          });
+          const payload = rows.map((row) => {
+            const names = namesByClass.get(row.id) || [];
+            return {
+              ...mapClassRow(row),
+              confirmedCount: row.confirmed_count,
+              confirmedNames: names,
+              spotsLeft: Math.max(0, row.capacity - row.confirmed_count),
+            };
+          });
+          return res.json(payload);
+        },
+      );
     },
   );
 });
@@ -681,6 +719,11 @@ app.post("/api/classes/:id/signup", requireUser, (req, res) => {
     }
     if (!classRow) {
       return res.status(404).json({ error: "Class not found" });
+    }
+    if (classRow.is_active === 0 || classRow.is_active === false) {
+      return res
+        .status(400)
+        .json({ error: "Ez az óra jelenleg nem elérhető." });
     }
 
     const now = new Date();
@@ -1110,6 +1153,25 @@ app.get("/api/admin/classes", requireAdmin, (req, res) => {
     }
     return res.json(rows.map(mapClassRow));
   });
+});
+
+app.post("/api/admin/classes/:id/availability", requireAdmin, (req, res) => {
+  const classId = Number(req.params.id);
+  const { isActive } = req.body || {};
+  const isActiveValue = isActive ? 1 : 0;
+  db.run(
+    "UPDATE classes SET is_active = ? WHERE id = ?",
+    [isActiveValue, classId],
+    function onUpdate(err) {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      if (this.changes === 0) {
+        return res.status(404).json({ error: "Class not found" });
+      }
+      return res.json({ ok: true, isActive: Boolean(isActiveValue) });
+    },
+  );
 });
 
 app.post("/api/admin/classes", requireAdmin, (req, res) => {
