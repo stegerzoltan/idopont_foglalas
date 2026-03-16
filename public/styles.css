@@ -24,6 +24,10 @@
   box-sizing: border-box;
 }
 
+html, body {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
   font-family: "Manrope", system-ui, sans-serif;
@@ -33,6 +37,8 @@ body {
     linear-gradient(135deg, #ff6b35 0%, #ff9a4d 35%, #b9384a 100%);
   background-color: var(--bg);
   min-height: 100vh;
+  background-repeat: no-repeat;
+  background-size: cover;
   animation: pageFade 0.6s ease;
   position: relative;
   overflow-x: hidden;
@@ -83,6 +89,9 @@ button, input, textarea {
   justify-content: space-between;
   align-items: center;
   padding: 1.5rem 5vw;
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
   background: linear-gradient(120deg, rgba(255, 255, 255, 0.6), rgba(255, 228, 205, 0.55));
   position: sticky;
   top: 0;
