@@ -377,9 +377,9 @@ body.modal-open .quick-menu {
   .calendar {
     min-width: 0;
     grid-template-columns: 70px repeat(5, minmax(120px, 1fr));
-    transform: scale(0.78);
+    transform: scale(0.68);
     transform-origin: top left;
-    width: calc(100% / 0.78);
+    width: calc(100% / 0.68);
   }
 }
 
