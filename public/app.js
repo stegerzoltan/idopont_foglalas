@@ -48,6 +48,7 @@ const classResetButton = document.getElementById("reset-class");
 const adminClassList = document.getElementById("admin-class-list");
 const adminSignups = document.getElementById("admin-signups");
 const adminNotifications = document.getElementById("admin-notifications");
+const adminUsers = document.getElementById("admin-users");
 const adminPill = document.getElementById("admin-pill");
 const weekTitle = document.getElementById("week-title");
 const openPass = document.getElementById("open-pass");
@@ -471,6 +472,83 @@ const renderNotifications = (notifications) => {
   });
 };
 
+const renderAdminUsers = (users) => {
+  if (!adminUsers) {
+    return;
+  }
+  adminUsers.innerHTML = "";
+  if (!users || users.length === 0) {
+    adminUsers.innerHTML =
+      '<div class="notice">Még nincs regisztrált tag.</div>';
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "pass-table admin-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>Név</th>
+        <th>Email</th>
+        <th>Születési dátum</th>
+        <th>Telefonszám</th>
+        <th>Regisztráció</th>
+        <th>Művelet</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+  const tbody = table.querySelector("tbody");
+  users.forEach((user) => {
+    const createdLabel = user.createdAt
+      ? new Date(user.createdAt).toLocaleDateString("hu-HU", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        })
+      : "-";
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${user.fullName || "-"}</td>
+      <td>${user.email || "-"}</td>
+      <td>${user.birthDate || "-"}</td>
+      <td>${user.phone || "-"}</td>
+      <td>${createdLabel}</td>
+      <td><button class="ghost" data-email="${user.email || ""}">Törlés</button></td>
+    `;
+    const deleteButton = row.querySelector("button");
+    deleteButton?.addEventListener("click", () => {
+      deleteAdminUser(user.email);
+    });
+    tbody.appendChild(row);
+  });
+  adminUsers.appendChild(table);
+};
+
+const deleteAdminUser = async (email) => {
+  if (!email) {
+    return;
+  }
+  const confirmed = window.confirm(
+    "Biztosan törlöd a tagot és az összes kapcsolódó adatát?",
+  );
+  if (!confirmed) {
+    return;
+  }
+  const response = await fetch(
+    `/api/admin/users/${encodeURIComponent(email)}`,
+    { method: "DELETE" },
+  );
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    window.alert(err.error || "Nem sikerult torolni a tagot.");
+    return;
+  }
+  await loadAdminData();
+};
+
 const renderPass = (data) => {
   if (!passSummary || !passUses) {
     return;
@@ -660,12 +738,17 @@ const loadMySignups = async () => {
 };
 
 const loadAdminData = async () => {
-  const [classesResponse, signupsResponse, notificationsResponse] =
-    await Promise.all([
-      fetch("/api/admin/classes"),
-      fetch("/api/admin/signups"),
-      fetch("/api/admin/notifications"),
-    ]);
+  const [
+    classesResponse,
+    signupsResponse,
+    notificationsResponse,
+    usersResponse,
+  ] = await Promise.all([
+    fetch("/api/admin/classes"),
+    fetch("/api/admin/signups"),
+    fetch("/api/admin/notifications"),
+    fetch("/api/admin/users"),
+  ]);
 
   if (classesResponse.status === 401) {
     adminPanel.hidden = true;
@@ -679,12 +762,14 @@ const loadAdminData = async () => {
   const classes = await classesResponse.json();
   const signups = await signupsResponse.json();
   const notifications = await notificationsResponse.json();
+  const users = await usersResponse.json();
   adminClassesCache = classes;
   updatePassClassOptions();
   updateAvailabilityOptions();
   renderAdminClasses(classes);
   renderSignups(signups);
   renderNotifications(notifications);
+  renderAdminUsers(users);
   adminPanel.hidden = false;
   adminLoginForm.parentElement.hidden = true;
   if (adminPill) {

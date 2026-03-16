@@ -1155,6 +1155,100 @@ app.get("/api/admin/classes", requireAdmin, (req, res) => {
   });
 });
 
+app.get("/api/admin/users", requireAdmin, (req, res) => {
+  db.all(
+    "SELECT full_name, email, birth_date, phone, created_at FROM users ORDER BY created_at DESC",
+    [],
+    (err, rows) => {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      const payload = rows.map((row) => ({
+        fullName: row.full_name,
+        email: row.email,
+        birthDate: row.birth_date,
+        phone: row.phone,
+        createdAt: row.created_at,
+      }));
+      return res.json(payload);
+    },
+  );
+});
+
+app.delete("/api/admin/users/:email", requireAdmin, (req, res) => {
+  const email = req.params.email;
+  if (!email) {
+    return res.status(400).json({ error: "Email required" });
+  }
+  db.get("SELECT email FROM users WHERE email = ?", [email], (err, row) => {
+    if (err) {
+      return res.status(500).json({ error: "Database error" });
+    }
+    if (!row) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    db.all(
+      "SELECT id FROM passes WHERE user_email = ?",
+      [email],
+      (passesErr, passRows) => {
+        if (passesErr) {
+          return res.status(500).json({ error: "Database error" });
+        }
+        const passIds = passRows.map((passRow) => passRow.id);
+        const deletePassUses = (index) => {
+          if (index >= passIds.length) {
+            return deletePasses();
+          }
+          db.run(
+            "DELETE FROM pass_uses WHERE pass_id = ?",
+            [passIds[index]],
+            (delErr) => {
+              if (delErr) {
+                return res.status(500).json({ error: "Database error" });
+              }
+              return deletePassUses(index + 1);
+            },
+          );
+        };
+        const deletePasses = () => {
+          db.run(
+            "DELETE FROM passes WHERE user_email = ?",
+            [email],
+            (passDelErr) => {
+              if (passDelErr) {
+                return res.status(500).json({ error: "Database error" });
+              }
+              return deleteSignups();
+            },
+          );
+        };
+        const deleteSignups = () => {
+          db.run(
+            "DELETE FROM signups WHERE email = ?",
+            [email],
+            (signupDelErr) => {
+              if (signupDelErr) {
+                return res.status(500).json({ error: "Database error" });
+              }
+              return deleteUser();
+            },
+          );
+        };
+        const deleteUser = () => {
+          db.run("DELETE FROM users WHERE email = ?", [email], (userErr) => {
+            if (userErr) {
+              return res.status(500).json({ error: "Database error" });
+            }
+            return res.json({ ok: true });
+          });
+        };
+
+        return deletePassUses(0);
+      },
+    );
+  });
+});
+
 app.post("/api/admin/classes/:id/availability", requireAdmin, (req, res) => {
   const classId = Number(req.params.id);
   const { isActive } = req.body || {};

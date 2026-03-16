@@ -333,9 +333,9 @@ body.modal-open .quick-menu {
 
 .calendar {
   display: grid;
-  grid-template-columns: 90px repeat(5, minmax(160px, 1fr));
-  gap: 0.75rem;
-  min-width: 880px;
+  grid-template-columns: 80px repeat(5, minmax(140px, 1fr));
+  gap: 0.6rem;
+  min-width: 760px;
 }
 
 .scroll-top {
@@ -397,7 +397,7 @@ body.modal-open .quick-menu {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.4rem;
+  padding: 0.3rem;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.6);
   border: 1px solid rgba(27, 42, 50, 0.08);
@@ -407,8 +407,8 @@ body.modal-open .quick-menu {
   background: var(--card-warm);
   border: 1px solid rgba(27, 42, 50, 0.06);
   border-radius: 18px;
-  padding: 0.85rem;
-  min-height: 110px;
+  padding: 0.7rem;
+  min-height: 98px;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
@@ -443,7 +443,7 @@ body.modal-open .quick-menu {
 
 .slot-time {
   font-weight: 800;
-  font-size: 1.4rem;
+  font-size: 1.3rem;
   color: var(--ink-strong);
   text-align: center;
 }
@@ -814,6 +814,10 @@ input, textarea {
 
 .pass-table tr:last-child td {
   border-bottom: none;
+}
+
+.admin-table td:nth-child(2) {
+  word-break: break-all;
 }
 
 @keyframes fadeIn {
