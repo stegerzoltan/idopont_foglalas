@@ -46,6 +46,7 @@ const classCapacityInput = document.getElementById("class-capacity");
 const classNotesInput = document.getElementById("class-notes");
 const classResetButton = document.getElementById("reset-class");
 const adminClassList = document.getElementById("admin-class-list");
+const adminClassToggle = document.getElementById("admin-class-toggle");
 const adminSignups = document.getElementById("admin-signups");
 const adminNotifications = document.getElementById("admin-notifications");
 const adminUsers = document.getElementById("admin-users");
@@ -85,6 +86,7 @@ let mySignupsCache = [];
 let authMode = "login";
 let lastViewportWidth = window.innerWidth;
 let adminClassesCache = [];
+let adminClassesOpen = false;
 
 const WEEK_DAYS = [
   { key: 1, label: "Hétfő" },
@@ -419,6 +421,19 @@ const renderClasses = (classes) => {
   lastClasses = classes;
   updateWeekTitle();
   renderCalendarGrid(classes);
+};
+
+const setAdminClassVisibility = (isOpen) => {
+  adminClassesOpen = isOpen;
+  if (adminClassList) {
+    adminClassList.hidden = !isOpen;
+  }
+  if (adminClassToggle) {
+    adminClassToggle.setAttribute("aria-expanded", String(isOpen));
+    adminClassToggle.textContent = isOpen
+      ? "Kártyák elrejtése"
+      : "Kártyák megnyitása";
+  }
 };
 
 const renderAdminClasses = (classes) => {
@@ -767,6 +782,7 @@ const loadAdminData = async () => {
   updatePassClassOptions();
   updateAvailabilityOptions();
   renderAdminClasses(classes);
+  setAdminClassVisibility(adminClassesOpen);
   renderSignups(signups);
   renderNotifications(notifications);
   renderAdminUsers(users);
@@ -1365,6 +1381,10 @@ openAdmin.addEventListener("click", () => {
   loadAdminData();
 });
 
+adminClassToggle?.addEventListener("click", () => {
+  setAdminClassVisibility(!adminClassesOpen);
+});
+
 enablePushButton?.addEventListener("click", () => {
   subscribeToPush().catch(() => {
     if (pushStatus) {
@@ -1450,6 +1470,7 @@ window.addEventListener("DOMContentLoaded", () => {
   loadClasses();
   loadUser();
   setAuthMode("login");
+  setAdminClassVisibility(false);
   scheduleWeekRefresh();
   if (userPhone) {
     userPhone.value = normalizePhone(userPhone.value);

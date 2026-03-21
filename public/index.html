@@ -201,8 +201,13 @@
           <h4 class="section-title">Értesítések</h4>
           <div id="admin-notifications" class="stack"></div>
 
-          <h4 class="section-title">Folyamatban lévő órák</h4>
-          <div id="admin-class-list" class="card-grid"></div>
+          <div class="section-title">
+            <h4>Folyamatban lévő órák</h4>
+            <button type="button" class="ghost" id="admin-class-toggle" aria-expanded="false">
+              Kártyák megnyitása
+            </button>
+          </div>
+          <div id="admin-class-list" class="card-grid" hidden></div>
 
           <h4 class="section-title">Feliratkozások</h4>
           <div id="admin-signups" class="stack"></div>
