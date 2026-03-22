@@ -145,7 +145,10 @@
               <h3>Óra kezelése</h3>
               <p class="helper">Itt tudod módosítani az órákat.</p>
             </div>
-            <button id="admin-logout" class="ghost">Kijelentkezés</button>
+            <div class="form-actions">
+              <button id="regenerate-classes" class="ghost" type="button">Heti órák újragenerálása</button>
+              <button id="admin-logout" class="ghost" type="button">Kijelentkezés</button>
+            </div>
           </div>
 
 
@@ -170,36 +173,14 @@
             <p class="helper" id="pass-admin-status"></p>
           </div>
 
-          <form id="class-form" class="class-form">
-            <input type="hidden" id="class-id" />
-            <label>
-              Kezdés
-              <input type="datetime-local" id="class-starts" required />
-            </label>
-            <label class="span-2">
-              Megjegyzés
-              <textarea id="class-notes" rows="3"></textarea>
-            </label>
-            <div class="form-actions span-2">
-              <button type="submit" class="primary" id="save-class">Mentem</button>
-              <button type="button" class="ghost" id="reset-class">Új óra</button>
-            </div>
-            <p class="helper span-2" id="class-message"></p>
-          </form>
 
-          <div class="notice availability-panel">
-            <strong>Óra elérhetőség</strong>
-            <p class="helper">Válassz órát, és állítsd elérhetővé vagy nem elérhetővé.</p>
-            <div class="form-actions">
-              <select id="availability-class"></select>
-              <button type="button" class="ghost" id="set-unavailable">Nem elérhető</button>
-              <button type="button" class="primary" id="set-available">Elérhető</button>
-            </div>
-            <p class="helper" id="availability-status"></p>
+          <div class="section-title">
+            <h4>Értesítések</h4>
+            <button type="button" class="ghost" id="admin-notifications-toggle" aria-expanded="false">
+              Értesítések megnyitása
+            </button>
           </div>
-
-          <h4 class="section-title">Értesítések</h4>
-          <div id="admin-notifications" class="stack"></div>
+          <div id="admin-notifications" class="stack" hidden></div>
 
           <div class="section-title">
             <h4>Folyamatban lévő órák</h4>
@@ -209,11 +190,11 @@
           </div>
           <div id="admin-class-list" class="card-grid" hidden></div>
 
-          <h4 class="section-title">Feliratkozások</h4>
-          <div id="admin-signups" class="stack"></div>
+          <div class="section-title">
+            <h4>Regisztrált tagok és bérlet</h4>
+          </div>
+          <div id="admin-users-pass" class="stack"></div>
 
-          <h4 class="section-title">Regisztrált tagok</h4>
-          <div id="admin-users" class="stack"></div>
         </div>
       </div>
     </div>

@@ -36,20 +36,15 @@ const closeSignup = document.getElementById("close-signup");
 const closeUser = document.getElementById("close-user");
 const closeAdmin = document.getElementById("close-admin");
 const adminLogout = document.getElementById("admin-logout");
-const classForm = document.getElementById("class-form");
+const regenerateClassesButton = document.getElementById("regenerate-classes");
 const classMessage = document.getElementById("class-message");
-const classIdInput = document.getElementById("class-id");
-const classTitleInput = document.getElementById("class-title");
-const classCoachInput = document.getElementById("class-coach");
-const classStartsInput = document.getElementById("class-starts");
-const classCapacityInput = document.getElementById("class-capacity");
-const classNotesInput = document.getElementById("class-notes");
-const classResetButton = document.getElementById("reset-class");
 const adminClassList = document.getElementById("admin-class-list");
 const adminClassToggle = document.getElementById("admin-class-toggle");
-const adminSignups = document.getElementById("admin-signups");
+const adminNotificationsToggle = document.getElementById(
+  "admin-notifications-toggle",
+);
 const adminNotifications = document.getElementById("admin-notifications");
-const adminUsers = document.getElementById("admin-users");
+const adminUsersPass = document.getElementById("admin-users-pass");
 const adminPill = document.getElementById("admin-pill");
 const weekTitle = document.getElementById("week-title");
 const openPass = document.getElementById("open-pass");
@@ -73,10 +68,6 @@ const passClassSelect = document.getElementById("pass-class-select");
 const addPassUseButton = document.getElementById("add-pass-use");
 const passUsesAdmin = document.getElementById("pass-uses-admin");
 const passAdminStatus = document.getElementById("pass-admin-status");
-const availabilityClassSelect = document.getElementById("availability-class");
-const setUnavailableButton = document.getElementById("set-unavailable");
-const setAvailableButton = document.getElementById("set-available");
-const availabilityStatus = document.getElementById("availability-status");
 
 let currentUser = null;
 let lastClasses = [];
@@ -87,6 +78,7 @@ let authMode = "login";
 let lastViewportWidth = window.innerWidth;
 let adminClassesCache = [];
 let adminClassesOpen = false;
+let adminNotificationsOpen = false;
 
 const WEEK_DAYS = [
   { key: 1, label: "Hétfő" },
@@ -107,7 +99,9 @@ const TIME_SLOTS = [
   "19:00",
 ];
 
-const FRIDAY_AFTERNOON = new Set(["16:00", "17:00", "18:00", "19:00"]);
+const MAX_SIGNUPS = 6;
+
+const FRIDAY_AFTERNOON = new Set(["16:00", "17:00", "18:00"]);
 
 const formatDate = (iso) => {
   const date = new Date(iso);
@@ -116,8 +110,27 @@ const formatDate = (iso) => {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Budapest",
   });
 };
+
+const formatTimeKey = (iso) => {
+  const date = new Date(iso);
+  return new Intl.DateTimeFormat("hu-HU", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Europe/Budapest",
+  }).format(date);
+};
+
+const getBudapestNow = () =>
+  new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Budapest" }));
+
+const toBudapestDate = (iso) =>
+  new Date(
+    new Date(iso).toLocaleString("en-US", { timeZone: "Europe/Budapest" }),
+  );
 
 const openModal = (modal) => {
   modal.classList.add("show");
@@ -216,7 +229,7 @@ const subscribeToPush = async () => {
 };
 
 const getDisplayWeekStart = () => {
-  const now = new Date();
+  const now = getBudapestNow();
   const day = now.getDay();
   const weekStart = new Date(now);
   const diffToMonday = day === 0 ? -6 : 1 - day;
@@ -259,13 +272,14 @@ const buildWeekDaysWithDates = (weekStart) =>
       dateLabel: date.toLocaleDateString("hu-HU", {
         month: "short",
         day: "numeric",
+        timeZone: "Europe/Budapest",
       }),
       date,
     };
   });
 
 const isPastDay = (date) => {
-  const today = new Date();
+  const today = getBudapestNow();
   const midnight = new Date(
     today.getFullYear(),
     today.getMonth(),
@@ -300,25 +314,17 @@ const renderDayMenu = (weekDays) => {
 const buildClassMap = (classes, weekStart) => {
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
-  const now = new Date();
   const classMap = new Map();
   classes.forEach((item) => {
-    const date = new Date(item.startsAt);
+    const date = toBudapestDate(item.startsAt);
     if (date < weekStart || date >= weekEnd) {
-      return;
-    }
-    if (date <= now) {
       return;
     }
     const weekday = date.getDay();
     if (weekday < 1 || weekday > 5) {
       return;
     }
-    const time = date.toLocaleTimeString("hu-HU", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+    const time = formatTimeKey(item.startsAt);
     classMap.set(`${weekday}-${time}`, item);
   });
   return classMap;
@@ -342,8 +348,9 @@ const buildSlot = (day, time, item) => {
   }
 
   const mySignupId = mySignupByClass.get(item.id);
-  const now = new Date();
-  const startsAt = new Date(item.startsAt);
+  const now = getBudapestNow();
+  const startsAt = toBudapestDate(item.startsAt);
+  const isPast = startsAt <= now;
   const diffHours = (startsAt - now) / 3600000;
   const badges = [];
   if (diffHours > 0 && diffHours <= 2) {
@@ -359,7 +366,12 @@ const buildSlot = (day, time, item) => {
   `;
 
   const button = document.createElement("button");
-  if (mySignupId) {
+  if (isPast) {
+    button.className = "ghost";
+    button.textContent = "Lejárt";
+    button.disabled = true;
+    slot.classList.add("slot-closed");
+  } else if (mySignupId) {
     button.className = "ghost";
     button.textContent = "Időpont törlése";
     button.addEventListener("click", () => cancelSignup(mySignupId));
@@ -436,40 +448,214 @@ const setAdminClassVisibility = (isOpen) => {
   }
 };
 
+const setAdminNotificationsVisibility = (isOpen) => {
+  adminNotificationsOpen = isOpen;
+  if (adminNotifications) {
+    adminNotifications.hidden = !isOpen;
+  }
+  if (adminNotificationsToggle) {
+    adminNotificationsToggle.setAttribute("aria-expanded", String(isOpen));
+    adminNotificationsToggle.textContent = isOpen
+      ? "Értesítések elrejtése"
+      : "Értesítések megnyitása";
+  }
+};
+
 const renderAdminClasses = (classes) => {
   adminClassList.innerHTML = "";
   classes.forEach((item) => {
     const card = document.createElement("div");
     card.className = "card";
+    const signups = Array.isArray(item.signups) ? item.signups : [];
+    const isFull = signups.length >= MAX_SIGNUPS;
+    const statusLabel = item.isActive === false ? "Nem elérhető" : "Elérhető";
+    const availabilityAction =
+      item.isActive === false ? "Elérhetővé teszem" : "Nem elérhetővé teszem";
     card.innerHTML = `
       <h4>${item.title}</h4>
       <div class="meta">
         <span>${item.coach ? `Edző: ${item.coach}` : ""}</span>
         <span>${formatDate(item.startsAt)}</span>
-        <span>Max ${item.capacity} fő</span>
+        <span>Max ${MAX_SIGNUPS} fő</span>
       </div>
-      <button class="ghost" data-action="edit">Szerkesztem</button>
-      <button class="ghost" data-action="delete">Törlés</button>
+      <div class="meta">
+        <span>Státusz: ${statusLabel}</span>
+        <span>${signups.length} / ${MAX_SIGNUPS} fő</span>
+      </div>
+      <div class="form-actions card-actions">
+        <button class="ghost" data-action="toggle-availability">
+          ${availabilityAction}
+        </button>
+      </div>
+      <div class="stack">
+        <strong>Feliratkozók</strong>
+        <div class="stack" data-role="signup-list"></div>
+      </div>
+      <div class="form-actions card-actions">
+        <input type="text" data-role="guest-name" placeholder="Vendég neve" />
+        <input type="email" data-role="guest-email" placeholder="vendeg@email" />
+        <button class="primary" data-action="add-guest">
+          Vendég hozzáadása
+        </button>
+      </div>
+      <p class="helper" data-role="card-status"></p>
     `;
-    const [editButton, deleteButton] = card.querySelectorAll("button");
-    editButton.addEventListener("click", () => fillClassForm(item));
-    deleteButton.addEventListener("click", () => deleteClass(item.id));
+    const listContainer = card.querySelector('[data-role="signup-list"]');
+    const statusText = card.querySelector('[data-role="card-status"]');
+    const nameInput = card.querySelector('[data-role="guest-name"]');
+    const emailInput = card.querySelector('[data-role="guest-email"]');
+    const toggleButton = card.querySelector(
+      '[data-action="toggle-availability"]',
+    );
+    const addGuestButton = card.querySelector('[data-action="add-guest"]');
+
+    if (listContainer) {
+      if (signups.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "notice";
+        empty.textContent = "Még nincs feliratkozó.";
+        listContainer.appendChild(empty);
+      } else {
+        signups.forEach((signup) => {
+          const row = document.createElement("div");
+          row.className = "notice";
+          row.innerHTML = `
+            <strong>${signup.name}</strong> (${signup.email})
+          `;
+          const removeButton = document.createElement("button");
+          removeButton.className = "ghost";
+          removeButton.textContent = "Törlés";
+          removeButton.addEventListener("click", () =>
+            cancelAdminSignup(signup.id, statusText),
+          );
+          row.appendChild(removeButton);
+          listContainer.appendChild(row);
+        });
+      }
+    }
+
+    toggleButton?.addEventListener("click", () =>
+      toggleClassAvailability(item.id, item.isActive === false, statusText),
+    );
+
+    addGuestButton?.addEventListener("click", () => {
+      if (isFull) {
+        setCardStatus(statusText, "Az óra betelt (max 6 fő).");
+        return;
+      }
+      const name = nameInput ? nameInput.value.trim() : "";
+      const email = emailInput ? emailInput.value.trim() : "";
+      addGuestToClass(
+        item.id,
+        name,
+        email,
+        signups,
+        statusText,
+        nameInput,
+        emailInput,
+      );
+    });
+    if (addGuestButton) {
+      addGuestButton.disabled = isFull;
+    }
     adminClassList.appendChild(card);
   });
 };
 
-const renderSignups = (signups) => {
-  adminSignups.innerHTML = "";
-  signups.forEach((item) => {
-    const row = document.createElement("div");
-    row.className = "notice";
-    row.innerHTML = `
-      <strong>${item.name}</strong> (${item.email})<br />
-      ${item.classTitle} - ${formatDate(item.classStartsAt)}<br />
-      Állapot: ${item.status}
-    `;
-    adminSignups.appendChild(row);
+const setCardStatus = (element, message) => {
+  if (element) {
+    element.textContent = message;
+  }
+};
+
+const cancelAdminSignup = async (id, statusElement) => {
+  const confirmed = window.confirm("Biztosan törlöd ezt a feliratkozást?");
+  if (!confirmed) {
+    return;
+  }
+  const response = await fetch(`/api/admin/signups/${id}/cancel`, {
+    method: "POST",
   });
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    setCardStatus(statusElement, err.error || "Nem sikerült törölni.");
+    return;
+  }
+  setCardStatus(statusElement, "Feliratkozás törölve.");
+  await loadAdminData();
+  await loadClasses();
+};
+
+const addGuestToClass = async (
+  classId,
+  name,
+  email,
+  signups,
+  statusElement,
+  nameInput,
+  emailInput,
+) => {
+  if (!name || !email) {
+    setCardStatus(statusElement, "Név és email kötelező.");
+    return;
+  }
+  const normalizedEmail = email.toLowerCase();
+  if (
+    Array.isArray(signups) &&
+    signups.some(
+      (signup) => String(signup.email).toLowerCase() === normalizedEmail,
+    )
+  ) {
+    setCardStatus(statusElement, "Ez az email már fel van iratkozva.");
+    return;
+  }
+  const response = await fetch(`/api/admin/classes/${classId}/signups`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, email }),
+  });
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    setCardStatus(statusElement, err.error || "Nem sikerült menteni.");
+    return;
+  }
+  if (nameInput) {
+    nameInput.value = "";
+  }
+  if (emailInput) {
+    emailInput.value = "";
+  }
+  setCardStatus(statusElement, "Vendég felírva.");
+  await loadAdminData();
+  await loadClasses();
+};
+
+const toggleClassAvailability = async (classId, isActive, statusElement) => {
+  const response = await fetch(`/api/admin/classes/${classId}/availability`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ isActive }),
+  });
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    setCardStatus(statusElement, err.error || "Nem sikerült frissíteni.");
+    return;
+  }
+  setCardStatus(
+    statusElement,
+    isActive ? "Óra elérhetővé téve." : "Óra nem elérhető.",
+  );
+  await loadAdminData();
+  await loadClasses();
 };
 
 const renderNotifications = (notifications) => {
@@ -487,83 +673,6 @@ const renderNotifications = (notifications) => {
   });
 };
 
-const renderAdminUsers = (users) => {
-  if (!adminUsers) {
-    return;
-  }
-  adminUsers.innerHTML = "";
-  if (!users || users.length === 0) {
-    adminUsers.innerHTML =
-      '<div class="notice">Még nincs regisztrált tag.</div>';
-    return;
-  }
-  const table = document.createElement("table");
-  table.className = "pass-table admin-table";
-  table.innerHTML = `
-    <thead>
-      <tr>
-        <th>Név</th>
-        <th>Email</th>
-        <th>Születési dátum</th>
-        <th>Telefonszám</th>
-        <th>Regisztráció</th>
-        <th>Művelet</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  `;
-  const tbody = table.querySelector("tbody");
-  users.forEach((user) => {
-    const createdLabel = user.createdAt
-      ? new Date(user.createdAt).toLocaleDateString("hu-HU", {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-        })
-      : "-";
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${user.fullName || "-"}</td>
-      <td>${user.email || "-"}</td>
-      <td>${user.birthDate || "-"}</td>
-      <td>${user.phone || "-"}</td>
-      <td>${createdLabel}</td>
-      <td><button class="ghost" data-email="${user.email || ""}">Törlés</button></td>
-    `;
-    const deleteButton = row.querySelector("button");
-    deleteButton?.addEventListener("click", () => {
-      deleteAdminUser(user.email);
-    });
-    tbody.appendChild(row);
-  });
-  adminUsers.appendChild(table);
-};
-
-const deleteAdminUser = async (email) => {
-  if (!email) {
-    return;
-  }
-  const confirmed = window.confirm(
-    "Biztosan törlöd a tagot és az összes kapcsolódó adatát?",
-  );
-  if (!confirmed) {
-    return;
-  }
-  const response = await fetch(
-    `/api/admin/users/${encodeURIComponent(email)}`,
-    { method: "DELETE" },
-  );
-  if (handleAdminUnauthorized(response)) {
-    return;
-  }
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    window.alert(err.error || "Nem sikerult torolni a tagot.");
-    return;
-  }
-  await loadAdminData();
-};
-
 const renderPass = (data) => {
   if (!passSummary || !passUses) {
     return;
@@ -571,7 +680,7 @@ const renderPass = (data) => {
   passSummary.innerHTML = "";
   passUses.innerHTML = "";
   if (!data || !data.pass) {
-    passSummary.innerHTML = '<div class="notice">Nincs aktiv bérleted.</div>';
+    passSummary.innerHTML = '<div class="notice">Nincs aktív bérleted.</div>';
     return;
   }
   const createdAt = new Date(data.pass.createdAt);
@@ -582,9 +691,9 @@ const renderPass = (data) => {
   });
   passSummary.innerHTML = `
     <div class="notice">
-      <strong>Aktiv berlet</strong><br />
-      Vasarlas datuma: ${createdLabel}<br />
-      Maradek: ${data.pass.remaining} / ${data.pass.total}
+      <strong>Aktív bérlet</strong><br />
+      Vásárlás dátuma: ${createdLabel}<br />
+      Maradék: ${data.pass.remaining} / ${data.pass.total}
     </div>
   `;
   if (!data.uses || data.uses.length === 0) {
@@ -596,8 +705,8 @@ const renderPass = (data) => {
   table.innerHTML = `
     <thead>
       <tr>
-        <th>Edzes</th>
-        <th>Datum</th>
+        <th>Edzés</th>
+        <th>Dátum</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -753,17 +862,12 @@ const loadMySignups = async () => {
 };
 
 const loadAdminData = async () => {
-  const [
-    classesResponse,
-    signupsResponse,
-    notificationsResponse,
-    usersResponse,
-  ] = await Promise.all([
-    fetch("/api/admin/classes"),
-    fetch("/api/admin/signups"),
-    fetch("/api/admin/notifications"),
-    fetch("/api/admin/users"),
-  ]);
+  const [classesResponse, notificationsResponse, usersResponse] =
+    await Promise.all([
+      fetch("/api/admin/classes"),
+      fetch("/api/admin/notifications"),
+      fetch("/api/admin/users/with-pass"),
+    ]);
 
   if (classesResponse.status === 401) {
     adminPanel.hidden = true;
@@ -775,17 +879,15 @@ const loadAdminData = async () => {
   }
 
   const classes = await classesResponse.json();
-  const signups = await signupsResponse.json();
   const notifications = await notificationsResponse.json();
   const users = await usersResponse.json();
   adminClassesCache = classes;
   updatePassClassOptions();
-  updateAvailabilityOptions();
   renderAdminClasses(classes);
   setAdminClassVisibility(adminClassesOpen);
-  renderSignups(signups);
   renderNotifications(notifications);
-  renderAdminUsers(users);
+  setAdminNotificationsVisibility(adminNotificationsOpen);
+  renderAdminUsersPass(users);
   adminPanel.hidden = false;
   adminLoginForm.parentElement.hidden = true;
   if (adminPill) {
@@ -803,21 +905,6 @@ const updatePassClassOptions = () => {
     option.value = String(item.id);
     option.textContent = `${item.title} - ${formatDate(item.startsAt)}`;
     passClassSelect.appendChild(option);
-  });
-};
-
-const updateAvailabilityOptions = () => {
-  if (!availabilityClassSelect) {
-    return;
-  }
-  availabilityClassSelect.innerHTML = "";
-  adminClassesCache.forEach((item) => {
-    const option = document.createElement("option");
-    const statusLabel =
-      item.isActive === false ? "(nem elérhető)" : "(elérhető)";
-    option.value = String(item.id);
-    option.textContent = `${formatDate(item.startsAt)} ${statusLabel}`;
-    availabilityClassSelect.appendChild(option);
   });
 };
 
@@ -848,11 +935,63 @@ const renderAdminPass = (data) => {
     `;
     const removeButton = document.createElement("button");
     removeButton.className = "ghost";
-    removeButton.textContent = "Alkalom torlese";
+    removeButton.textContent = "Alkalom törlése";
     removeButton.addEventListener("click", () => deletePassUse(use.id));
     row.appendChild(removeButton);
     passUsesAdmin.appendChild(row);
   });
+};
+
+const renderAdminUsersPass = (users) => {
+  if (!adminUsersPass) {
+    return;
+  }
+  adminUsersPass.innerHTML = "";
+  if (!users || users.length === 0) {
+    adminUsersPass.innerHTML =
+      '<div class="notice">Még nincs regisztrált tag.</div>';
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "pass-table admin-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>Név</th>
+        <th>Email</th>
+        <th>Születési dátum</th>
+        <th>Telefonszám</th>
+        <th>Bérlet</th>
+        <th>Regisztráció</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+  const tbody = table.querySelector("tbody");
+  users.forEach((user) => {
+    const createdLabel = user.createdAt
+      ? new Date(user.createdAt).toLocaleDateString("hu-HU", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        })
+      : "-";
+    const passLabel =
+      user.passTotal != null && user.passRemaining != null
+        ? `${user.passRemaining} / ${user.passTotal}`
+        : "Nincs bérlet";
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${user.fullName || "-"}</td>
+      <td>${user.email || "-"}</td>
+      <td>${user.birthDate || "-"}</td>
+      <td>${user.phone || "-"}</td>
+      <td>${passLabel}</td>
+      <td>${createdLabel}</td>
+    `;
+    tbody.appendChild(row);
+  });
+  adminUsersPass.appendChild(table);
 };
 
 const loadAdminPass = async () => {
@@ -861,7 +1000,7 @@ const loadAdminPass = async () => {
   }
   const email = passAdminEmail.value.trim();
   if (!email) {
-    passAdminStatus.textContent = "Email megadasa kotelezo.";
+    passAdminStatus.textContent = "Email megadása kötelező.";
     return;
   }
   passAdminStatus.textContent = "";
@@ -873,7 +1012,7 @@ const loadAdminPass = async () => {
   }
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    passAdminStatus.textContent = err.error || "Nem sikerult betolteni.";
+    passAdminStatus.textContent = err.error || "Nem sikerült betölteni.";
     return;
   }
   const data = await response.json();
@@ -886,7 +1025,7 @@ const saveAdminPass = async () => {
   }
   const email = passAdminEmail.value.trim();
   if (!email) {
-    passAdminStatus.textContent = "Email megadasa kotelezo.";
+    passAdminStatus.textContent = "Email megadása kötelező.";
     return;
   }
   const total = passTotalInput.value;
@@ -901,10 +1040,10 @@ const saveAdminPass = async () => {
   }
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    passAdminStatus.textContent = err.error || "Nem sikerult menteni.";
+    passAdminStatus.textContent = err.error || "Nem sikerült menteni.";
     return;
   }
-  passAdminStatus.textContent = "Berlet frissitve.";
+  passAdminStatus.textContent = "Bérlet frissítve.";
   await loadAdminPass();
 };
 
@@ -915,7 +1054,7 @@ const addPassUse = async () => {
   const email = passAdminEmail.value.trim();
   const classId = passClassSelect.value;
   if (!email || !classId) {
-    passAdminStatus.textContent = "Email es ora kivalasztasa kotelezo.";
+    passAdminStatus.textContent = "Email és óra kiválasztása kötelező.";
     return;
   }
   const response = await fetch("/api/admin/passes/use", {
@@ -928,10 +1067,10 @@ const addPassUse = async () => {
   }
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    passAdminStatus.textContent = err.error || "Nem sikerult menteni.";
+    passAdminStatus.textContent = err.error || "Nem sikerült menteni.";
     return;
   }
-  passAdminStatus.textContent = "Alkalom hozzaadva.";
+  passAdminStatus.textContent = "Alkalom hozzáadva.";
   await loadAdminPass();
 };
 
@@ -944,10 +1083,10 @@ const deletePassUse = async (useId) => {
   }
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    passAdminStatus.textContent = err.error || "Nem sikerult torolni.";
+    passAdminStatus.textContent = err.error || "Nem sikerült törölni.";
     return;
   }
-  passAdminStatus.textContent = "Alkalom torolve.";
+  passAdminStatus.textContent = "Alkalom törölve.";
   await loadAdminPass();
 };
 
@@ -955,7 +1094,9 @@ const handleAdminUnauthorized = (response) => {
   if (response.status === 401) {
     adminPanel.hidden = true;
     adminLoginForm.parentElement.hidden = false;
-    classMessage.textContent = "Lejárt a belépés. Jelentkezz be újra.";
+    if (classMessage) {
+      classMessage.textContent = "Lejárt a belépés. Jelentkezz be újra.";
+    }
     if (adminPill) {
       adminPill.hidden = true;
     }
@@ -1046,58 +1187,6 @@ const setAuthMode = (mode) => {
   }
 };
 
-const fillClassForm = (item) => {
-  classIdInput.value = item.id;
-  if (classTitleInput) {
-    classTitleInput.value = item.title;
-  }
-  if (classCoachInput) {
-    classCoachInput.value = item.coach || "";
-  }
-  classStartsInput.value = item.startsAt.slice(0, 16);
-  if (classCapacityInput) {
-    classCapacityInput.value = item.capacity;
-  }
-  classNotesInput.value = item.notes || "";
-  classMessage.textContent = "Szerkesztés betöltve.";
-  const modalContent = adminModal.querySelector(".modal-content");
-  if (modalContent) {
-    modalContent.scrollTo({ top: 0, behavior: "smooth" });
-  }
-};
-
-const resetClassForm = () => {
-  classIdInput.value = "";
-  if (classTitleInput) {
-    classTitleInput.value = "";
-  }
-  if (classCoachInput) {
-    classCoachInput.value = "";
-  }
-  classStartsInput.value = "";
-  if (classCapacityInput) {
-    classCapacityInput.value = "";
-  }
-  classNotesInput.value = "";
-  classMessage.textContent = "";
-};
-
-const deleteClass = async (id) => {
-  classMessage.textContent = "";
-  const response = await fetch(`/api/admin/classes/${id}`, {
-    method: "DELETE",
-  });
-  if (handleAdminUnauthorized(response)) {
-    return;
-  }
-  if (!response.ok) {
-    classMessage.textContent = "Nem sikerült törölni.";
-    return;
-  }
-  await loadAdminData();
-  await loadClasses();
-};
-
 const cancelSignup = async (id) => {
   const response = await fetch(`/api/signups/${id}/cancel`, {
     method: "POST",
@@ -1126,6 +1215,10 @@ signupForm.addEventListener("submit", async (event) => {
     return;
   }
   const classId = signupClassId.value;
+  if (mySignupByClass.has(Number(classId))) {
+    signupMessage.textContent = "Erre az órára már fel vagy iratkozva.";
+    return;
+  }
   const response = await fetch(`/api/classes/${classId}/signup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1217,45 +1310,6 @@ adminLoginForm.addEventListener("submit", async (event) => {
   }
 });
 
-classForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  classMessage.textContent = "";
-  const payload = {
-    title: classTitleInput ? classTitleInput.value.trim() : "Edzes",
-    coach: classCoachInput ? classCoachInput.value.trim() : "",
-    startsAt: classStartsInput.value,
-    capacity: classCapacityInput ? Number(classCapacityInput.value) : 9999,
-    notes: classNotesInput.value.trim(),
-  };
-
-  const method = classIdInput.value ? "PUT" : "POST";
-  const url = classIdInput.value
-    ? `/api/admin/classes/${classIdInput.value}`
-    : "/api/admin/classes";
-
-  const response = await fetch(url, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  if (handleAdminUnauthorized(response)) {
-    return;
-  }
-
-  if (!response.ok) {
-    classMessage.textContent = "Nem sikerült menteni.";
-    return;
-  }
-
-  classMessage.textContent = "Mentve.";
-  resetClassForm();
-  await loadAdminData();
-  await loadClasses();
-});
-
-classResetButton.addEventListener("click", resetClassForm);
-
 adminLogout.addEventListener("click", async () => {
   await fetch("/api/admin/logout", { method: "POST" });
   adminPanel.hidden = true;
@@ -1263,6 +1317,28 @@ adminLogout.addEventListener("click", async () => {
   if (adminPill) {
     adminPill.hidden = true;
   }
+});
+
+regenerateClassesButton?.addEventListener("click", async () => {
+  const confirmed = window.confirm(
+    "Biztosan újragenerálod a heti órákat? Ez minden feliratkozást és bérlet alkalmat töröl.",
+  );
+  if (!confirmed) {
+    return;
+  }
+  const response = await fetch("/api/admin/classes/regenerate", {
+    method: "POST",
+  });
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    classMessage.textContent = "Nem sikerült újragenerálni.";
+    return;
+  }
+  classMessage.textContent = "Heti órák újragenerálva.";
+  await loadAdminData();
+  await loadClasses();
 });
 
 loadPassAdminButton?.addEventListener("click", () => {
@@ -1276,7 +1352,7 @@ assignPassButton?.addEventListener("click", async () => {
   passAdminStatus.textContent = "";
   const email = passAdminEmail.value.trim();
   if (!email) {
-    passAdminStatus.textContent = "Email megadasa kotelezo.";
+    passAdminStatus.textContent = "Email megadása kötelező.";
     return;
   }
   const response = await fetch("/api/admin/passes/assign", {
@@ -1290,10 +1366,10 @@ assignPassButton?.addEventListener("click", async () => {
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     passAdminStatus.textContent =
-      err.error || "Nem sikerult a berletet rogziteni.";
+      err.error || "Nem sikerült a bérletet rögzíteni.";
     return;
   }
-  passAdminStatus.textContent = "Berlet rogzitve.";
+  passAdminStatus.textContent = "Bérlet rögzítve.";
   passTotalInput.value = "10";
   passRemainingInput.value = "10";
   await loadAdminPass();
@@ -1305,43 +1381,6 @@ savePassAdminButton?.addEventListener("click", () => {
 
 addPassUseButton?.addEventListener("click", () => {
   addPassUse();
-});
-
-const setClassAvailability = async (isActive) => {
-  if (!availabilityClassSelect || !availabilityStatus) {
-    return;
-  }
-  const classId = availabilityClassSelect.value;
-  if (!classId) {
-    availabilityStatus.textContent = "Valassz egy orat.";
-    return;
-  }
-  availabilityStatus.textContent = "";
-  const response = await fetch(`/api/admin/classes/${classId}/availability`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ isActive }),
-  });
-  if (handleAdminUnauthorized(response)) {
-    return;
-  }
-  if (!response.ok) {
-    availabilityStatus.textContent = "Nem sikerult frissiteni.";
-    return;
-  }
-  availabilityStatus.textContent = isActive
-    ? "Ora elerhetove teve."
-    : "Ora nem elerheto.";
-  await loadAdminData();
-  await loadClasses();
-};
-
-setUnavailableButton?.addEventListener("click", () => {
-  setClassAvailability(false);
-});
-
-setAvailableButton?.addEventListener("click", () => {
-  setClassAvailability(true);
 });
 
 openUser.addEventListener("click", async () => {
@@ -1385,6 +1424,10 @@ adminClassToggle?.addEventListener("click", () => {
   setAdminClassVisibility(!adminClassesOpen);
 });
 
+adminNotificationsToggle?.addEventListener("click", () => {
+  setAdminNotificationsVisibility(!adminNotificationsOpen);
+});
+
 enablePushButton?.addEventListener("click", () => {
   subscribeToPush().catch(() => {
     if (pushStatus) {
@@ -1397,16 +1440,16 @@ testTelegramButton?.addEventListener("click", async () => {
   if (!telegramStatus) {
     return;
   }
-  telegramStatus.textContent = "Kuldem a teszt uzenetet...";
+  telegramStatus.textContent = "Küldöm a teszt üzenetet...";
   const response = await fetch("/api/admin/telegram/test", {
     method: "POST",
   });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    telegramStatus.textContent = err.error || "Nem sikerult a Telegram teszt.";
+    telegramStatus.textContent = err.error || "Nem sikerült a Telegram teszt.";
     return;
   }
-  telegramStatus.textContent = "Telegram teszt elkuldve.";
+  telegramStatus.textContent = "Telegram teszt elküldve.";
 });
 
 closeSignup.addEventListener("click", () => closeModal(signupModal));
@@ -1437,7 +1480,7 @@ assignPassButton?.addEventListener("click", async () => {
   passAdminStatus.textContent = "";
   const email = passEmailInput.value.trim();
   if (!email) {
-    passAdminStatus.textContent = "Email megadasa kotelezo.";
+    passAdminStatus.textContent = "Email megadása kötelező.";
     return;
   }
   const response = await fetch("/api/admin/passes/assign", {
@@ -1448,10 +1491,10 @@ assignPassButton?.addEventListener("click", async () => {
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     passAdminStatus.textContent =
-      err.error || "Nem sikerult a berletet rogziteni.";
+      err.error || "Nem sikerült a bérletet rögzíteni.";
     return;
   }
-  passAdminStatus.textContent = "Berlet rogzitve.";
+  passAdminStatus.textContent = "Bérlet rögzítve.";
   passEmailInput.value = "";
 });
 
@@ -1471,6 +1514,7 @@ window.addEventListener("DOMContentLoaded", () => {
   loadUser();
   setAuthMode("login");
   setAdminClassVisibility(false);
+  setAdminNotificationsVisibility(false);
   scheduleWeekRefresh();
   if (userPhone) {
     userPhone.value = normalizePhone(userPhone.value);
@@ -1520,7 +1564,7 @@ scrollTopButton?.addEventListener("click", () => {
 });
 
 const scheduleWeekRefresh = () => {
-  const now = new Date();
+  const now = getBudapestNow();
   const target = new Date(now);
   const day = now.getDay();
   const diffToFriday = day <= 5 ? 5 - day : 12 - day;

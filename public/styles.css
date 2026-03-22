@@ -533,6 +533,7 @@ body.modal-open .quick-menu {
   background: linear-gradient(140deg, rgba(30, 136, 229, 0.12), transparent 55%);
   opacity: 0;
   transition: opacity 0.3s ease;
+  pointer-events: none;
 }
 
 .card:hover::before {
@@ -732,6 +733,20 @@ input, textarea {
   display: flex;
   gap: 0.8rem;
   align-items: center;
+}
+
+.card-actions {
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.card-actions input {
+  flex: 1 1 180px;
+  min-width: 180px;
+}
+
+.card-actions button {
+  flex: 1 1 180px;
 }
 
 .pass-panel .form-actions {

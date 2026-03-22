@@ -429,7 +429,13 @@ const TIME_SLOTS = [
   "19:00",
 ];
 
-const FRIDAY_AFTERNOON = new Set(["16:00", "17:00", "18:00", "19:00"]);
+const MAX_SIGNUPS = 6;
+
+const CLASS_DURATION_MINUTES = 60;
+const PASS_USE_BACKDATE_DAYS = 7;
+const PASS_USE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+
+const FRIDAY_AFTERNOON = new Set(["16:00", "17:00", "18:00"]);
 
 const getDisplayWeekStart = () => {
   const now = new Date();
@@ -476,11 +482,80 @@ const seedWeeklyClasses = () => {
           const startsAt = new Date(weekStart);
           startsAt.setDate(weekStart.getDate() + (day.key - 1));
           startsAt.setHours(hour, minute, 0, 0);
-          stmt.run("Edzes", "Zoltan", startsAt.toISOString(), 9999, "");
+          stmt.run("Edzes", "Zoltan", startsAt.toISOString(), MAX_SIGNUPS, "");
         });
       });
 
       stmt.finalize();
+    },
+  );
+};
+
+const processDuePassUses = () => {
+  const now = new Date();
+  const cutoff = new Date(
+    now.getTime() - CLASS_DURATION_MINUTES * 60 * 1000,
+  ).toISOString();
+
+  db.all(
+    `SELECT s.id AS signup_id, s.email, s.class_id, c.starts_at
+     FROM signups s
+     JOIN classes c ON s.class_id = c.id
+     WHERE s.status = 'confirmed' AND c.starts_at <= ?`,
+    [cutoff],
+    (err, rows) => {
+      if (err || !rows || rows.length === 0) {
+        return;
+      }
+
+      const processNext = (index) => {
+        if (index >= rows.length) {
+          return;
+        }
+        const row = rows[index];
+        const email = row.email;
+        const classId = row.class_id;
+
+        db.get(
+          "SELECT id, remaining FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
+          [email],
+          (passErr, passRow) => {
+            if (passErr || !passRow || passRow.remaining <= 0) {
+              return processNext(index + 1);
+            }
+            db.get(
+              `SELECT pu.id
+               FROM pass_uses pu
+               JOIN passes p ON pu.pass_id = p.id
+               WHERE p.user_email = ? AND pu.class_id = ?
+               LIMIT 1`,
+              [email, classId],
+              (useErr, useRow) => {
+                if (useErr || useRow) {
+                  return processNext(index + 1);
+                }
+                const usedAt = new Date().toISOString();
+                db.run(
+                  "UPDATE passes SET remaining = remaining - 1 WHERE id = ? AND remaining > 0",
+                  [passRow.id],
+                  function onUpdate(updateErr) {
+                    if (updateErr || this.changes === 0) {
+                      return processNext(index + 1);
+                    }
+                    db.run(
+                      "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
+                      [passRow.id, classId, usedAt],
+                      () => processNext(index + 1),
+                    );
+                  },
+                );
+              },
+            );
+          },
+        );
+      };
+
+      processNext(0);
     },
   );
 };
@@ -662,7 +737,7 @@ app.post("/api/admin/telegram/test", requireAdmin, async (req, res) => {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
     return res.status(400).json({ error: "Telegram not configured" });
   }
-  await sendTelegramMessage("Telegram teszt uzenet: mukodik az ertesites.");
+  await sendTelegramMessage("Telegram teszt üzenet: működik az értesítés.");
   return res.json({ ok: true });
 });
 
@@ -734,47 +809,57 @@ app.post("/api/classes/:id/signup", requireUser, (req, res) => {
         .json({ error: "A feliratkozás az óra kezdete után nem lehetséges." });
     }
 
-    const createdAt = new Date().toISOString();
-    db.run(
-      "INSERT INTO signups (class_id, name, email, created_at, status) VALUES (?, ?, ?, ?, 'confirmed')",
-      [classId, fullName, email, createdAt],
-      function onInsert(insertErr) {
-        if (insertErr) {
+    db.get(
+      "SELECT id, status FROM signups WHERE class_id = ? AND email = ? AND status IN ('confirmed', 'pending')",
+      [classId, email],
+      (dupeErr, dupeRow) => {
+        if (dupeErr) {
           return res.status(500).json({ error: "Database error" });
         }
+        if (dupeRow) {
+          return res
+            .status(400)
+            .json({ error: "Erre az órára már fel vagy iratkozva." });
+        }
         db.get(
-          "SELECT * FROM passes WHERE user_email = ? AND remaining > 0 ORDER BY created_at DESC LIMIT 1",
-          [email],
-          (passErr, passRow) => {
-            if (!passErr && passRow) {
-              db.run(
-                "UPDATE passes SET remaining = remaining - 1 WHERE id = ?",
-                [passRow.id],
-              );
-              db.run(
-                "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
-                [passRow.id, classId, createdAt],
-              );
+          "SELECT COUNT(*) AS confirmed_count FROM signups WHERE class_id = ? AND status = 'confirmed'",
+          [classId],
+          (countErr, countRow) => {
+            if (countErr) {
+              return res.status(500).json({ error: "Database error" });
             }
-            createNotification(
-              "signup",
-              `Uj feliratkozas: ${fullName} (${email}) - ${classRow.title} (${classRow.starts_at})`,
+            if (countRow.confirmed_count >= MAX_SIGNUPS) {
+              return res.status(400).json({ error: "Class is full" });
+            }
+            const createdAt = new Date().toISOString();
+            db.run(
+              "INSERT INTO signups (class_id, name, email, created_at, status) VALUES (?, ?, ?, ?, 'confirmed')",
+              [classId, fullName, email, createdAt],
+              function onInsert(insertErr) {
+                if (insertErr) {
+                  return res.status(500).json({ error: "Database error" });
+                }
+                createNotification(
+                  "signup",
+                  `Uj feliratkozas: ${fullName} (${email}) - ${classRow.title} (${classRow.starts_at})`,
+                );
+                sendPushToAll(
+                  "Uj feliratkozas",
+                  `${fullName} (${email}) - ${classRow.title}`,
+                );
+                sendTelegramMessage(
+                  `Új feliratkozás: ${fullName} (${email}) - ${classRow.title} (${classRow.starts_at})`,
+                );
+                return res.json({
+                  id: this.lastID,
+                  classId,
+                  name: fullName,
+                  email,
+                  createdAt,
+                  status: "confirmed",
+                });
+              },
             );
-            sendPushToAll(
-              "Uj feliratkozas",
-              `${fullName} (${email}) - ${classRow.title}`,
-            );
-            sendTelegramMessage(
-              `Uj feliratkozas: ${fullName} (${email}) - ${classRow.title} (${classRow.starts_at})`,
-            );
-            return res.json({
-              id: this.lastID,
-              classId,
-              name: fullName,
-              email,
-              createdAt,
-              status: "confirmed",
-            });
           },
         );
       },
@@ -847,7 +932,7 @@ app.post("/api/signups/:id/cancel", requireUser, (req, res) => {
                           `Lemondas: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
                         );
                         sendTelegramMessage(
-                          `Lemondas: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
+                          `Lemondás: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
                         );
                         return res.json({ status: "cancelled" });
                       },
@@ -861,7 +946,7 @@ app.post("/api/signups/:id/cancel", requireUser, (req, res) => {
                 `Lemondas: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
               );
               sendTelegramMessage(
-                `Lemondas: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
+                `Lemondás: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
               );
               return res.json({ status: "cancelled" });
             },
@@ -1084,7 +1169,7 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
         return res.status(400).json({ error: "No active pass" });
       }
       db.get(
-        "SELECT id FROM classes WHERE id = ?",
+        "SELECT id, starts_at FROM classes WHERE id = ?",
         [classId],
         (classErr, classRow) => {
           if (classErr) {
@@ -1093,22 +1178,60 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
           if (!classRow) {
             return res.status(404).json({ error: "Class not found" });
           }
-          const usedAt = new Date().toISOString();
-          db.run(
-            "UPDATE passes SET remaining = remaining - 1 WHERE id = ?",
-            [passRow.id],
-            (updateErr) => {
-              if (updateErr) {
+          const classStart = new Date(classRow.starts_at);
+          const now = new Date();
+          const earliest = new Date(
+            now.getTime() - PASS_USE_BACKDATE_DAYS * 24 * 60 * 60 * 1000,
+          );
+          if (classStart > now) {
+            return res
+              .status(400)
+              .json({ error: "Csak lezajlott orara adhato alkalom." });
+          }
+          if (classStart < earliest) {
+            return res.status(400).json({
+              error: "Csak az elmult 7 nap oraihoz adhato alkalom.",
+            });
+          }
+          db.get(
+            `SELECT pu.id
+             FROM pass_uses pu
+             JOIN passes p ON pu.pass_id = p.id
+             WHERE p.user_email = ? AND pu.class_id = ?
+             LIMIT 1`,
+            [email, classId],
+            (useErr, useRow) => {
+              if (useErr) {
                 return res.status(500).json({ error: "Database error" });
               }
+              if (useRow) {
+                return res
+                  .status(400)
+                  .json({ error: "Ez az alkalom mar levonva." });
+              }
+              const usedAt = new Date().toISOString();
               db.run(
-                "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
-                [passRow.id, classId, usedAt],
-                function onInsert(insertErr) {
-                  if (insertErr) {
+                "UPDATE passes SET remaining = remaining - 1 WHERE id = ? AND remaining > 0",
+                [passRow.id],
+                function onUpdate(updateErr) {
+                  if (updateErr) {
                     return res.status(500).json({ error: "Database error" });
                   }
-                  return res.json({ id: this.lastID });
+                  if (this.changes === 0) {
+                    return res.status(400).json({ error: "No remaining" });
+                  }
+                  db.run(
+                    "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
+                    [passRow.id, classId, usedAt],
+                    function onInsert(insertErr) {
+                      if (insertErr) {
+                        return res
+                          .status(500)
+                          .json({ error: "Database error" });
+                      }
+                      return res.json({ id: this.lastID });
+                    },
+                  );
                 },
               );
             },
@@ -1151,7 +1274,42 @@ app.get("/api/admin/classes", requireAdmin, (req, res) => {
     if (err) {
       return res.status(500).json({ error: "Database error" });
     }
-    return res.json(rows.map(mapClassRow));
+    if (!rows || rows.length === 0) {
+      return res.json([]);
+    }
+    const classIds = rows.map((row) => row.id);
+    const placeholders = classIds.map(() => "?").join(",");
+    db.all(
+      `SELECT id, class_id, name, email, status
+       FROM signups
+       WHERE (status IS NULL OR status NOT IN ('cancelled', 'rejected'))
+         AND class_id IN (${placeholders})
+       ORDER BY created_at ASC`,
+      classIds,
+      (signErr, signRows) => {
+        if (signErr) {
+          return res.status(500).json({ error: "Database error" });
+        }
+        const signupsByClass = new Map();
+        signRows.forEach((row) => {
+          const classKey = String(row.class_id);
+          if (!signupsByClass.has(classKey)) {
+            signupsByClass.set(classKey, []);
+          }
+          signupsByClass.get(classKey).push({
+            id: row.id,
+            name: row.name,
+            email: row.email,
+            status: row.status,
+          });
+        });
+        const payload = rows.map((row) => ({
+          ...mapClassRow(row),
+          signups: signupsByClass.get(String(row.id)) || [],
+        }));
+        return res.json(payload);
+      },
+    );
   });
 });
 
@@ -1171,6 +1329,71 @@ app.get("/api/admin/users", requireAdmin, (req, res) => {
         createdAt: row.created_at,
       }));
       return res.json(payload);
+    },
+  );
+});
+
+app.get("/api/admin/users/with-pass", requireAdmin, (req, res) => {
+  db.all(
+    `SELECT
+       u.full_name,
+       u.email,
+       u.birth_date,
+       u.phone,
+       u.created_at,
+       (SELECT p.total FROM passes p WHERE p.user_email = u.email ORDER BY p.created_at DESC LIMIT 1) AS pass_total,
+       (SELECT p.remaining FROM passes p WHERE p.user_email = u.email ORDER BY p.created_at DESC LIMIT 1) AS pass_remaining
+     FROM users u
+     ORDER BY u.created_at DESC`,
+    [],
+    (err, rows) => {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      const payload = rows.map((row) => ({
+        fullName: row.full_name,
+        email: row.email,
+        birthDate: row.birth_date,
+        phone: row.phone,
+        createdAt: row.created_at,
+        passTotal: row.pass_total != null ? Number(row.pass_total) : null,
+        passRemaining:
+          row.pass_remaining != null ? Number(row.pass_remaining) : null,
+      }));
+      return res.json(payload);
+    },
+  );
+});
+
+app.post("/api/admin/users/create", requireAdmin, (req, res) => {
+  const { fullName, email, password, birthDate, phone } = req.body || {};
+  if (!fullName || !email || !password || !birthDate || !phone) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+  const createdAt = new Date().toISOString();
+  const { hash, salt } = hashPassword(password);
+  const consentText = "Admin created user";
+  db.run(
+    "INSERT INTO users (full_name, email, birth_date, phone, password_hash, password_salt, consent_text, consent_accepted_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [
+      fullName,
+      email,
+      birthDate,
+      phone,
+      hash,
+      salt,
+      consentText,
+      createdAt,
+      createdAt,
+    ],
+    function onInsert(err) {
+      if (err) {
+        if (String(err.message || "").includes("UNIQUE")) {
+          return res.status(409).json({ error: "Email already registered" });
+        }
+        return res.status(500).json({ error: "Database error" });
+      }
+      return res.json({ ok: true, id: this.lastID });
     },
   );
 });
@@ -1264,6 +1487,155 @@ app.post("/api/admin/classes/:id/availability", requireAdmin, (req, res) => {
         return res.status(404).json({ error: "Class not found" });
       }
       return res.json({ ok: true, isActive: Boolean(isActiveValue) });
+    },
+  );
+});
+
+app.post("/api/admin/classes/:id/signups", requireAdmin, (req, res) => {
+  const classId = Number(req.params.id);
+  const { name, email } = req.body || {};
+  if (!name || !email) {
+    return res.status(400).json({ error: "Name and email required" });
+  }
+  db.get(
+    "SELECT title, starts_at, capacity FROM classes WHERE id = ?",
+    [classId],
+    (classErr, classRow) => {
+      if (classErr) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      if (!classRow) {
+        return res.status(404).json({ error: "Class not found" });
+      }
+      db.get(
+        "SELECT id, status FROM signups WHERE class_id = ? AND email = ? AND status IN ('confirmed', 'pending')",
+        [classId, email],
+        (dupeErr, dupeRow) => {
+          if (dupeErr) {
+            return res.status(500).json({ error: "Database error" });
+          }
+          if (dupeRow) {
+            return res
+              .status(400)
+              .json({ error: "Erre az órára már fel van iratkozva." });
+          }
+          db.get(
+            "SELECT COUNT(*) AS confirmed_count FROM signups WHERE class_id = ? AND status = 'confirmed'",
+            [classId],
+            (countErr, countRow) => {
+              if (countErr) {
+                return res.status(500).json({ error: "Database error" });
+              }
+              if (countRow.confirmed_count >= MAX_SIGNUPS) {
+                return res.status(400).json({ error: "Class is full" });
+              }
+              const createdAt = new Date().toISOString();
+              db.run(
+                "INSERT INTO signups (class_id, name, email, created_at, status) VALUES (?, ?, ?, ?, 'confirmed')",
+                [classId, name, email, createdAt],
+                function onInsert(err) {
+                  if (err) {
+                    return res.status(500).json({ error: "Database error" });
+                  }
+                  createNotification(
+                    "signup",
+                    `Uj feliratkozas: ${name} (${email}) - ${classRow.title} (${classRow.starts_at})`,
+                  );
+                  sendTelegramMessage(
+                    `Új feliratkozás: ${name} (${email}) - ${classRow.title} (${classRow.starts_at})`,
+                  );
+                  return res.json({ id: this.lastID });
+                },
+              );
+            },
+          );
+        },
+      );
+    },
+  );
+});
+
+app.post("/api/admin/classes/:id/signups/cancel", requireAdmin, (req, res) => {
+  const classId = Number(req.params.id);
+  const { email } = req.body || {};
+  if (!email) {
+    return res.status(400).json({ error: "Email required" });
+  }
+  db.get(
+    `SELECT s.*, c.title AS class_title, c.starts_at AS class_starts
+     FROM signups s
+     JOIN classes c ON s.class_id = c.id
+     WHERE s.class_id = ? AND s.email = ?
+     ORDER BY s.created_at DESC
+     LIMIT 1`,
+    [classId, email],
+    (err, row) => {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      if (!row) {
+        return res.status(404).json({ error: "Signup not found" });
+      }
+      if (row.status === "cancelled" || row.status === "rejected") {
+        return res.status(400).json({ error: "Signup already closed" });
+      }
+      db.run(
+        "UPDATE signups SET status = 'cancelled' WHERE id = ?",
+        [row.id],
+        (updateErr) => {
+          if (updateErr) {
+            return res.status(500).json({ error: "Database error" });
+          }
+          db.get(
+            `SELECT pu.id, pu.pass_id
+             FROM pass_uses pu
+             JOIN passes p ON pu.pass_id = p.id
+             WHERE p.user_email = ? AND pu.class_id = ?
+             ORDER BY pu.used_at DESC
+             LIMIT 1`,
+            [email, row.class_id],
+            (passErr, passUseRow) => {
+              if (passErr) {
+                return res.status(500).json({ error: "Database error" });
+              }
+              const finalize = () => {
+                createNotification(
+                  "cancel",
+                  `Lemondas: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
+                );
+                sendTelegramMessage(
+                  `Lemondás: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
+                );
+                return res.json({ status: "cancelled" });
+              };
+              if (!passUseRow) {
+                return finalize();
+              }
+              db.run(
+                "UPDATE passes SET remaining = remaining + 1 WHERE id = ?",
+                [passUseRow.pass_id],
+                (refundErr) => {
+                  if (refundErr) {
+                    return res.status(500).json({ error: "Database error" });
+                  }
+                  db.run(
+                    "DELETE FROM pass_uses WHERE id = ?",
+                    [passUseRow.id],
+                    (deleteErr) => {
+                      if (deleteErr) {
+                        return res
+                          .status(500)
+                          .json({ error: "Database error" });
+                      }
+                      return finalize();
+                    },
+                  );
+                },
+              );
+            },
+          );
+        },
+      );
     },
   );
 });
@@ -1379,7 +1751,7 @@ app.delete("/api/admin/classes/:id", requireAdmin, (req, res) => {
                                 .json({ error: "Database error" });
                             }
                             if (signupRows.length > 0) {
-                              const message = `Lemondas: Ora torolve - ${classRow.title} (${classRow.starts_at}) - ${signupRows.length} feliratkozas`;
+                              const message = `Lemondás: Óra törölve - ${classRow.title} (${classRow.starts_at}) - ${signupRows.length} feliratkozás`;
                               createNotification("cancel", message);
                               sendTelegramMessage(message);
                             }
@@ -1511,6 +1883,85 @@ app.post("/api/admin/signups/:id/reject", requireAdmin, (req, res) => {
   );
 });
 
+app.post("/api/admin/signups/:id/cancel", requireAdmin, (req, res) => {
+  const signupId = Number(req.params.id);
+  db.get(
+    `SELECT s.*, c.title AS class_title, c.starts_at AS class_starts
+     FROM signups s
+     JOIN classes c ON s.class_id = c.id
+     WHERE s.id = ?`,
+    [signupId],
+    (err, row) => {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      if (!row) {
+        return res.status(404).json({ error: "Signup not found" });
+      }
+      if (row.status === "cancelled" || row.status === "rejected") {
+        return res.status(400).json({ error: "Signup already closed" });
+      }
+      db.run(
+        "UPDATE signups SET status = 'cancelled' WHERE id = ?",
+        [signupId],
+        (updateErr) => {
+          if (updateErr) {
+            return res.status(500).json({ error: "Database error" });
+          }
+          db.get(
+            `SELECT pu.id, pu.pass_id
+             FROM pass_uses pu
+             JOIN passes p ON pu.pass_id = p.id
+             WHERE p.user_email = ? AND pu.class_id = ?
+             ORDER BY pu.used_at DESC
+             LIMIT 1`,
+            [row.email, row.class_id],
+            (passErr, passUseRow) => {
+              if (passErr) {
+                return res.status(500).json({ error: "Database error" });
+              }
+              const finalize = () => {
+                createNotification(
+                  "cancel",
+                  `Lemondas: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
+                );
+                sendTelegramMessage(
+                  `Lemondás: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
+                );
+                return res.json({ status: "cancelled" });
+              };
+              if (!passUseRow) {
+                return finalize();
+              }
+              db.run(
+                "UPDATE passes SET remaining = remaining + 1 WHERE id = ?",
+                [passUseRow.pass_id],
+                (refundErr) => {
+                  if (refundErr) {
+                    return res.status(500).json({ error: "Database error" });
+                  }
+                  db.run(
+                    "DELETE FROM pass_uses WHERE id = ?",
+                    [passUseRow.id],
+                    (deleteErr) => {
+                      if (deleteErr) {
+                        return res
+                          .status(500)
+                          .json({ error: "Database error" });
+                      }
+                      return finalize();
+                    },
+                  );
+                },
+              );
+            },
+          );
+        },
+      );
+    },
+  );
+});
+
 app.get("/api/admin/notifications", requireAdmin, (req, res) => {
   db.all(
     "SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20",
@@ -1531,6 +1982,8 @@ app.get("/health", (req, res) => {
 initDb()
   .then(() => {
     seedWeeklyClasses();
+    processDuePassUses();
+    setInterval(processDuePassUses, PASS_USE_SWEEP_INTERVAL_MS);
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });
