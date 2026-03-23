@@ -4,6 +4,7 @@ const path = require("path");
 const fs = require("fs");
 const express = require("express");
 const session = require("express-session");
+const PgSession = require("connect-pg-simple")(session);
 const { Pool } = require("pg");
 const sqlite3 = require("sqlite3").verbose();
 const crypto = require("crypto");
@@ -37,13 +38,6 @@ webpush.setVapidDetails(
 
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "dev-secret",
-    resave: false,
-    saveUninitialized: false,
-  }),
-);
 app.use(
   express.static(path.join(__dirname, "public"), {
     etag: false,
@@ -143,6 +137,25 @@ if (IS_POSTGRES) {
   }
   db = new sqlite3.Database(DB_PATH);
 }
+
+const sessionOptions = {
+  secret: process.env.SESSION_SECRET || "dev-secret",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    sameSite: "lax",
+  },
+};
+
+if (IS_POSTGRES && pgPool) {
+  sessionOptions.store = new PgSession({
+    pool: pgPool,
+    tableName: "user_sessions",
+    createTableIfMissing: true,
+  });
+}
+
+app.use(session(sessionOptions));
 
 const initDb = async () => {
   if (IS_POSTGRES && pgPool) {
