@@ -147,6 +147,20 @@ const closeModal = (modal) => {
   }
 };
 
+const openAdminLogin = () => {
+  openModal(adminModal);
+  loadAdminData();
+};
+
+const shouldOpenAdminFromUrl = () => {
+  const hash = String(window.location.hash || "").toLowerCase();
+  if (hash === "#admin") {
+    return true;
+  }
+  const params = new URLSearchParams(window.location.search);
+  return params.get("admin") === "1";
+};
+
 const normalizePhone = (value) => {
   const digits = String(value || "").replace(/\D/g, "");
   if (digits.startsWith("36")) {
@@ -1415,9 +1429,14 @@ signupLoginButton.addEventListener("click", () => {
   openModal(userModal);
 });
 
-openAdmin.addEventListener("click", () => {
-  openModal(adminModal);
-  loadAdminData();
+openAdmin?.addEventListener("click", () => {
+  openAdminLogin();
+});
+
+window.addEventListener("hashchange", () => {
+  if (shouldOpenAdminFromUrl()) {
+    openAdminLogin();
+  }
 });
 
 adminClassToggle?.addEventListener("click", () => {
@@ -1518,6 +1537,9 @@ window.addEventListener("DOMContentLoaded", () => {
   scheduleWeekRefresh();
   if (userPhone) {
     userPhone.value = normalizePhone(userPhone.value);
+  }
+  if (shouldOpenAdminFromUrl()) {
+    openAdminLogin();
   }
 });
 
