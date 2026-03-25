@@ -17,7 +17,14 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || `mailto:${ADMIN_EMAIL}`;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const IS_POSTGRES = Boolean(process.env.DATABASE_URL);
+
+if (IS_PRODUCTION && !IS_POSTGRES) {
+  throw new Error(
+    "DATABASE_URL is required in production. Refusing to start without Postgres.",
+  );
+}
 let vapidKeys = {
   publicKey: process.env.VAPID_PUBLIC_KEY,
   privateKey: process.env.VAPID_PRIVATE_KEY,
@@ -135,6 +142,7 @@ if (IS_POSTGRES) {
   if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
   }
+  console.warn(`DATABASE_URL missing. Using SQLite fallback at ${DB_PATH}.`);
   db = new sqlite3.Database(DB_PATH);
 }
 
