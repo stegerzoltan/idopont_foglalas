@@ -77,6 +77,7 @@ let mySignupsCache = [];
 let authMode = "login";
 let lastViewportWidth = window.innerWidth;
 let adminClassesCache = [];
+let adminUsersCache = [];
 let adminClassesOpen = false;
 let adminNotificationsOpen = false;
 
@@ -122,6 +123,17 @@ const formatTimeKey = (iso) => {
     hour12: false,
     timeZone: "Europe/Budapest",
   }).format(date);
+};
+
+const compactSignupName = (value) => {
+  const parts = String(value || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length <= 1) {
+    return parts[0] || "";
+  }
+  return `${parts[0]} ${parts[1].charAt(0)}.`;
 };
 
 const getBudapestNow = () =>
@@ -371,12 +383,17 @@ const buildSlot = (day, time, item) => {
     badges.push('<span class="badge badge--soon">Hamarosan indul</span>');
   }
   const names = Array.isArray(item.confirmedNames) ? item.confirmedNames : [];
-  const namesText = names.length ? names.join(", ") : "Nincs feliratkozó";
+  const compactNames = names.map((name) => compactSignupName(name));
+  const namesText = compactNames.length
+    ? compactNames.join(" • ")
+    : "Nincs feliratkozó";
+  const namesClass =
+    compactNames.length >= 5 ? "slot-names slot-names--compact" : "slot-names";
   slot.innerHTML = `
     <div class="slot-time">${time}</div>
     ${badges.length ? `<div class="slot-badges">${badges.join("")}</div>` : ""}
     <div class="slot-meta">Feliratkozott: ${item.confirmedCount} fő</div>
-    <div class="slot-names">${namesText}</div>
+    <div class="${namesClass}">${namesText}</div>
   `;
 
   const button = document.createElement("button");
@@ -512,6 +529,14 @@ const renderAdminClasses = (classes) => {
           Vendég hozzáadása
         </button>
       </div>
+      <div class="form-actions card-actions">
+        <select data-role="registered-user">
+          <option value="">Regisztrált tag kiválasztása</option>
+        </select>
+        <button class="ghost" data-action="add-registered">
+          Regisztrált tag felírása
+        </button>
+      </div>
       <p class="helper" data-role="card-status"></p>
     `;
     const listContainer = card.querySelector('[data-role="signup-list"]');
@@ -522,6 +547,21 @@ const renderAdminClasses = (classes) => {
       '[data-action="toggle-availability"]',
     );
     const addGuestButton = card.querySelector('[data-action="add-guest"]');
+    const registeredSelect = card.querySelector(
+      '[data-role="registered-user"]',
+    );
+    const addRegisteredButton = card.querySelector(
+      '[data-action="add-registered"]',
+    );
+
+    if (registeredSelect) {
+      adminUsersCache.forEach((user) => {
+        const option = document.createElement("option");
+        option.value = user.email;
+        option.textContent = `${user.fullName || "Nevtelen"} (${user.email})`;
+        registeredSelect.appendChild(option);
+      });
+    }
 
     if (listContainer) {
       if (signups.length === 0) {
@@ -569,8 +609,21 @@ const renderAdminClasses = (classes) => {
         emailInput,
       );
     });
+
+    addRegisteredButton?.addEventListener("click", () => {
+      if (isFull) {
+        setCardStatus(statusText, "Az óra betelt (max 6 fő).");
+        return;
+      }
+      const userEmail = registeredSelect ? registeredSelect.value.trim() : "";
+      addRegisteredUserToClass(item.id, userEmail, statusText);
+    });
+
     if (addGuestButton) {
       addGuestButton.disabled = isFull;
+    }
+    if (addRegisteredButton) {
+      addRegisteredButton.disabled = isFull;
     }
     adminClassList.appendChild(card);
   });
@@ -650,6 +703,29 @@ const addGuestToClass = async (
   await loadClasses();
 };
 
+const addRegisteredUserToClass = async (classId, userEmail, statusElement) => {
+  if (!userEmail) {
+    setCardStatus(statusElement, "Válassz regisztrált tagot.");
+    return;
+  }
+  const response = await fetch(`/api/admin/classes/${classId}/signups`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userEmail }),
+  });
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    setCardStatus(statusElement, err.error || "Nem sikerült menteni.");
+    return;
+  }
+  setCardStatus(statusElement, "Regisztrált tag felírva.");
+  await loadAdminData();
+  await loadClasses();
+};
+
 const toggleClassAvailability = async (classId, isActive, statusElement) => {
   const response = await fetch(`/api/admin/classes/${classId}/availability`, {
     method: "POST",
@@ -703,11 +779,13 @@ const renderPass = (data) => {
     month: "long",
     day: "numeric",
   });
+  const purchased = Number(data.pass.total) || 0;
+  const used = Array.isArray(data.uses) ? data.uses.length : 0;
   passSummary.innerHTML = `
     <div class="notice">
       <strong>Aktív bérlet</strong><br />
       Vásárlás dátuma: ${createdLabel}<br />
-      Maradék: ${data.pass.remaining} / ${data.pass.total}
+      Vásárolt: ${purchased} | Felhasznált: ${used}
     </div>
   `;
   if (!data.uses || data.uses.length === 0) {
@@ -896,6 +974,7 @@ const loadAdminData = async () => {
   const notifications = await notificationsResponse.json();
   const users = await usersResponse.json();
   adminClassesCache = classes;
+  adminUsersCache = Array.isArray(users) ? users : [];
   updatePassClassOptions();
   renderAdminClasses(classes);
   setAdminClassVisibility(adminClassesOpen);
@@ -975,8 +1054,10 @@ const renderAdminUsersPass = (users) => {
         <th>Email</th>
         <th>Születési dátum</th>
         <th>Telefonszám</th>
+        <th>Új jelszó</th>
         <th>Bérlet</th>
         <th>Regisztráció</th>
+        <th>Művelet</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -992,20 +1073,116 @@ const renderAdminUsersPass = (users) => {
       : "-";
     const passLabel =
       user.passTotal != null && user.passRemaining != null
-        ? `${user.passRemaining} / ${user.passTotal}`
+        ? `Vásárolt: ${user.passTotal} | Felhasznált: ${user.passUsed != null ? Number(user.passUsed) : Math.max(0, Number(user.passTotal) - Number(user.passRemaining))}`
         : "Nincs bérlet";
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td>${user.fullName || "-"}</td>
-      <td>${user.email || "-"}</td>
-      <td>${user.birthDate || "-"}</td>
-      <td>${user.phone || "-"}</td>
+      <td><input type="text" data-role="full-name" /></td>
+      <td><input type="email" data-role="email" /></td>
+      <td><input type="text" data-role="birth-date" placeholder="YYYY-MM-DD" /></td>
+      <td><input type="tel" data-role="phone" /></td>
+      <td><input type="password" data-role="password" placeholder="csak ha változik" /></td>
       <td>${passLabel}</td>
       <td>${createdLabel}</td>
+      <td class="form-actions">
+        <button class="primary" data-action="save-user">Mentés</button>
+        <button class="ghost" data-action="delete-user">Törlés</button>
+      </td>
     `;
+    const fullNameInput = row.querySelector('[data-role="full-name"]');
+    const emailInput = row.querySelector('[data-role="email"]');
+    const birthDateInput = row.querySelector('[data-role="birth-date"]');
+    const phoneInput = row.querySelector('[data-role="phone"]');
+    const passwordInput = row.querySelector('[data-role="password"]');
+    const saveButton = row.querySelector('[data-action="save-user"]');
+    const deleteButton = row.querySelector('[data-action="delete-user"]');
+
+    if (fullNameInput) {
+      fullNameInput.value = user.fullName || "";
+    }
+    if (emailInput) {
+      emailInput.value = user.email || "";
+    }
+    if (birthDateInput) {
+      birthDateInput.value = user.birthDate || "";
+    }
+    if (phoneInput) {
+      phoneInput.value = user.phone || "";
+    }
+
+    saveButton?.addEventListener("click", () => {
+      updateAdminUser(user.email, {
+        fullName: fullNameInput ? fullNameInput.value.trim() : "",
+        email: emailInput ? emailInput.value.trim() : "",
+        birthDate: birthDateInput ? birthDateInput.value.trim() : "",
+        phone: phoneInput ? phoneInput.value.trim() : "",
+        password: passwordInput ? passwordInput.value : "",
+      });
+    });
+
+    deleteButton?.addEventListener("click", () => {
+      deleteAdminUser(user.email);
+    });
     tbody.appendChild(row);
   });
   adminUsersPass.appendChild(table);
+};
+
+const updateAdminUser = async (currentEmail, payload) => {
+  const response = await fetch(
+    `/api/admin/users/${encodeURIComponent(currentEmail)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    if (classMessage) {
+      classMessage.textContent =
+        err.error || "Nem sikerült menteni a tag adatait.";
+    }
+    return;
+  }
+  if (classMessage) {
+    classMessage.textContent = "Tag adatai frissítve.";
+  }
+  await loadAdminData();
+  await loadClasses();
+};
+
+const deleteAdminUser = async (email) => {
+  const confirmed = window.confirm(
+    `Biztosan törlöd ezt a regisztrált tagot? (${email})`,
+  );
+  if (!confirmed) {
+    return;
+  }
+  const response = await fetch(
+    `/api/admin/users/${encodeURIComponent(email)}`,
+    {
+      method: "DELETE",
+    },
+  );
+  if (handleAdminUnauthorized(response)) {
+    return;
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    if (classMessage) {
+      classMessage.textContent = err.error || "Nem sikerült törölni a tagot.";
+    }
+    return;
+  }
+  if (classMessage) {
+    classMessage.textContent = "Tag törölve.";
+  }
+  await loadAdminData();
+  await loadClasses();
 };
 
 const loadAdminPass = async () => {

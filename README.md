@@ -35,4 +35,7 @@ Az admin belepeshez a `.env` fajlban add meg az `ADMIN_EMAIL` es `ADMIN_PASSWORD
 - Feliratkozas jovahagyassal (alapbol pending)
 - Admin felulet ora letrehozas, modositas, torles
 - Feliratkozasok listazasa admin feluleten (jovahagyas / elutasitas)
+- Regisztralt tagok admin szerkesztese (nev, email, szuletesi datum, telefon, jelszo)
+- Regisztralt tag torlese admin feluletrol
+- Admin feliratkoztathat orara regisztralt tagot is (nem csak vendeget)
 - Admin ertesitesek lista feliratkozas / lemondas / jovahagyas / elutasitas eseten
