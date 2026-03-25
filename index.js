@@ -458,9 +458,9 @@ const getDisplayWeekStart = () => {
   weekStart.setDate(now.getDate() + diffToMonday);
   weekStart.setHours(0, 0, 0, 0);
 
-  const isFridayAfterTen = day === 5 && now.getHours() >= 10;
+  const isFridayAfterNoon = day === 5 && now.getHours() >= 12;
   const isWeekend = day === 6 || day === 0;
-  if (isFridayAfterTen || isWeekend) {
+  if (isFridayAfterNoon || isWeekend) {
     weekStart.setDate(weekStart.getDate() + 7);
   }
   return weekStart;

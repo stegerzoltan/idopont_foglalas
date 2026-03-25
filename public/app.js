@@ -262,12 +262,22 @@ const getDisplayWeekStart = () => {
   weekStart.setDate(now.getDate() + diffToMonday);
   weekStart.setHours(0, 0, 0, 0);
 
-  const isFridayAfterTen = day === 5 && now.getHours() >= 10;
+  const isFridayAfterNoon = day === 5 && now.getHours() >= 12;
   const isWeekend = day === 6 || day === 0;
-  if (isFridayAfterTen || isWeekend) {
+  if (isFridayAfterNoon || isWeekend) {
     weekStart.setDate(weekStart.getDate() + 7);
   }
   return weekStart;
+};
+
+const filterClassesToDisplayWeek = (classes) => {
+  const weekStart = getDisplayWeekStart();
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 7);
+  return (classes || []).filter((item) => {
+    const startsAt = toBudapestDate(item.startsAt);
+    return startsAt >= weekStart && startsAt < weekEnd;
+  });
 };
 
 const getIsoWeekNumber = (date) => {
@@ -976,7 +986,7 @@ const loadAdminData = async () => {
   adminClassesCache = classes;
   adminUsersCache = Array.isArray(users) ? users : [];
   updatePassClassOptions();
-  renderAdminClasses(classes);
+  renderAdminClasses(filterClassesToDisplayWeek(classes));
   setAdminClassVisibility(adminClassesOpen);
   renderNotifications(notifications);
   setAdminNotificationsVisibility(adminNotificationsOpen);
@@ -1054,7 +1064,6 @@ const renderAdminUsersPass = (users) => {
         <th>Email</th>
         <th>Születési dátum</th>
         <th>Telefonszám</th>
-        <th>Új jelszó</th>
         <th>Bérlet</th>
         <th>Regisztráció</th>
         <th>Művelet</th>
@@ -1081,7 +1090,6 @@ const renderAdminUsersPass = (users) => {
       <td><input type="email" data-role="email" /></td>
       <td><input type="text" data-role="birth-date" placeholder="YYYY-MM-DD" /></td>
       <td><input type="tel" data-role="phone" /></td>
-      <td><input type="password" data-role="password" placeholder="csak ha változik" /></td>
       <td>${passLabel}</td>
       <td>${createdLabel}</td>
       <td class="form-actions">
@@ -1093,7 +1101,6 @@ const renderAdminUsersPass = (users) => {
     const emailInput = row.querySelector('[data-role="email"]');
     const birthDateInput = row.querySelector('[data-role="birth-date"]');
     const phoneInput = row.querySelector('[data-role="phone"]');
-    const passwordInput = row.querySelector('[data-role="password"]');
     const saveButton = row.querySelector('[data-action="save-user"]');
     const deleteButton = row.querySelector('[data-action="delete-user"]');
 
@@ -1116,7 +1123,6 @@ const renderAdminUsersPass = (users) => {
         email: emailInput ? emailInput.value.trim() : "",
         birthDate: birthDateInput ? birthDateInput.value.trim() : "",
         phone: phoneInput ? phoneInput.value.trim() : "",
-        password: passwordInput ? passwordInput.value : "",
       });
     });
 
@@ -1768,13 +1774,14 @@ const scheduleWeekRefresh = () => {
   const day = now.getDay();
   const diffToFriday = day <= 5 ? 5 - day : 12 - day;
   target.setDate(now.getDate() + diffToFriday);
-  target.setHours(10, 0, 0, 0);
+  target.setHours(12, 0, 0, 0);
   if (target <= now) {
     target.setDate(target.getDate() + 7);
   }
   const delay = target.getTime() - now.getTime();
   setTimeout(async () => {
     await loadClasses();
+    await loadAdminData();
     scheduleWeekRefresh();
   }, delay);
 };
