@@ -54,7 +54,7 @@ Vagy futtasd lokalisan egy paranccsal:
 npm run harden:supabase
 ```
 
-Render production deploy eseten kotelezo a `DATABASE_URL` beallitasa. Enelkul a szerver nem indul el, hogy ne tortenjen veletlen SQLite fallback es adatvesztes.
+Render production deploy eseten erosen ajanlott a `DATABASE_URL` beallitasa, hogy a szolgaltatas biztosan PostgreSQL/Supabase adatbazist hasznaljon.
 
 A script:
 
