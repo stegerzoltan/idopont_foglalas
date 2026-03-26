@@ -1023,7 +1023,7 @@ const renderAdminPass = (data) => {
     return;
   }
   passTotalInput.value = String(data.pass.total);
-  passRemainingInput.value = String(data.pass.remaining);
+  passRemainingInput.value = String(data.pass.total - data.pass.remaining);
   if (!data.uses || data.uses.length === 0) {
     passUsesAdmin.innerHTML =
       '<div class="notice">Nincs még levont alkalom.</div>';
@@ -1226,7 +1226,8 @@ const saveAdminPass = async () => {
     return;
   }
   const total = passTotalInput.value;
-  const remaining = passRemainingInput.value;
+  const used = passRemainingInput.value;
+  const remaining = String(Math.max(0, Number(total) - Number(used)));
   const response = await fetch("/api/admin/passes/set", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1394,11 +1395,9 @@ const cancelSignup = async (id) => {
     signupMessage.textContent = "Nem sikerült törölni az időpontot.";
     return;
   }
-  signupMessage.textContent = "Sikeresen törölve!";
-  openModal(signupModal);
+  closeModal(signupModal);
   await loadMySignups();
   await loadClasses();
-  setTimeout(() => closeModal(signupModal), 2000);
 };
 
 signupForm.addEventListener("submit", async (event) => {
@@ -1568,7 +1567,7 @@ assignPassButton?.addEventListener("click", async () => {
   }
   passAdminStatus.textContent = "Bérlet rögzítve.";
   passTotalInput.value = "10";
-  passRemainingInput.value = "10";
+  passRemainingInput.value = "0";
   await loadAdminPass();
 });
 
