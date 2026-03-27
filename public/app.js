@@ -1746,12 +1746,9 @@ addPassUseButton?.addEventListener("click", () => {
 
 openUser.addEventListener("click", async () => {
   if (currentUser) {
-    await fetch("/api/auth/logout", { method: "POST" });
-    currentUser = null;
-    updateUserUI();
-    renderCalendarSync(null);
-    renderMySignups([]);
-    renderSignupsMenu();
+    // Ha be van jelentkezve, csak nyissuk meg a user modalt, NE léptessük ki!
+    openModal(userModal);
+    renderCalendarSync();
     return;
   }
   setAuthMode("login");
