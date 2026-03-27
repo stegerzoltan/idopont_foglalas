@@ -1,5 +1,7 @@
 // ...existing code...
 
+// ...existing code...
+
 // Admin: adott user-hez, adott órához alkalom (pass use) hozzáadása
 app.post("/api/admin/passes/use", requireAdmin, async (req, res) => {
   const { userEmail, classId } = req.body;

@@ -975,6 +975,11 @@ const openSignup = (item) => {
     }
   }
   openModal(signupModal);
+  // Ha be van jelentkezve, jelenítsük meg a naptár szinkronizációs panelt is a signup modalban
+  if (currentUser && calendarSync) {
+    calendarSync.hidden = false;
+    renderCalendarSync();
+  }
   loadMySignups();
 };
 
