@@ -14,6 +14,14 @@ const openUser = document.getElementById("open-user");
 const userModal = document.getElementById("user-modal");
 const userLoginForm = document.getElementById("user-login-form");
 const userLoginMessage = document.getElementById("user-login-message");
+const calendarSync = document.getElementById("calendar-sync");
+const calendarSyncStatus = document.getElementById("calendar-sync-status");
+const connectGoogleCalendarButton = document.getElementById(
+  "connect-google-calendar",
+);
+const disconnectGoogleCalendarButton = document.getElementById(
+  "disconnect-google-calendar",
+);
 const authLoginButton = document.getElementById("auth-login");
 const authRegisterButton = document.getElementById("auth-register");
 const authSubmitButton = document.getElementById("auth-submit");
@@ -80,6 +88,7 @@ let adminClassesCache = [];
 let adminUsersCache = [];
 let adminClassesOpen = false;
 let adminNotificationsOpen = false;
+let calendarSyncLoading = false;
 
 const WEEK_DAYS = [
   { key: 1, label: "Hétfő" },
@@ -102,7 +111,14 @@ const TIME_SLOTS = [
 
 const MAX_SIGNUPS = 6;
 
-const FRIDAY_AFTERNOON = new Set(["16:00", "17:00", "18:00"]);
+const FRIDAY_DISABLED_SLOTS = new Set(["16:00", "17:00", "18:00", "19:00"]);
+
+const isFridayDisabledClass = (startsAtIso) => {
+  const startsAt = toBudapestDate(startsAtIso);
+  const weekday = startsAt.getDay();
+  const time = formatTimeKey(startsAtIso);
+  return weekday === 5 && FRIDAY_DISABLED_SLOTS.has(time);
+};
 
 const formatDate = (iso) => {
   const date = new Date(iso);
@@ -356,6 +372,9 @@ const buildClassMap = (classes, weekStart) => {
     if (date < weekStart || date >= weekEnd) {
       return;
     }
+    if (isFridayDisabledClass(item.startsAt)) {
+      return;
+    }
     const weekday = date.getDay();
     if (weekday < 1 || weekday > 5) {
       return;
@@ -379,7 +398,7 @@ const buildSlot = (day, time, item) => {
   const delay = (day.key - 1) * 0.06 + Math.max(timeIndex, 0) * 0.04;
   slot.style.setProperty("--slot-delay", `${delay}s`);
 
-  if (day.key === 5 && FRIDAY_AFTERNOON.has(time)) {
+  if (day.key === 5 && FRIDAY_DISABLED_SLOTS.has(time)) {
     return null;
   }
 
@@ -504,15 +523,17 @@ const setAdminNotificationsVisibility = (isOpen) => {
 
 const renderAdminClasses = (classes) => {
   adminClassList.innerHTML = "";
-  classes.forEach((item) => {
-    const card = document.createElement("div");
-    card.className = "card";
-    const signups = Array.isArray(item.signups) ? item.signups : [];
-    const isFull = signups.length >= MAX_SIGNUPS;
-    const statusLabel = item.isActive === false ? "Nem elérhető" : "Elérhető";
-    const availabilityAction =
-      item.isActive === false ? "Elérhetővé teszem" : "Nem elérhetővé teszem";
-    card.innerHTML = `
+  (classes || [])
+    .filter((item) => !isFridayDisabledClass(item.startsAt))
+    .forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "card";
+      const signups = Array.isArray(item.signups) ? item.signups : [];
+      const isFull = signups.length >= MAX_SIGNUPS;
+      const statusLabel = item.isActive === false ? "Nem elérhető" : "Elérhető";
+      const availabilityAction =
+        item.isActive === false ? "Elérhetővé teszem" : "Nem elérhetővé teszem";
+      card.innerHTML = `
       <h4>${item.title}</h4>
       <div class="meta">
         <span>${item.coach ? `Edző: ${item.coach}` : ""}</span>
@@ -549,94 +570,94 @@ const renderAdminClasses = (classes) => {
       </div>
       <p class="helper" data-role="card-status"></p>
     `;
-    const listContainer = card.querySelector('[data-role="signup-list"]');
-    const statusText = card.querySelector('[data-role="card-status"]');
-    const nameInput = card.querySelector('[data-role="guest-name"]');
-    const emailInput = card.querySelector('[data-role="guest-email"]');
-    const toggleButton = card.querySelector(
-      '[data-action="toggle-availability"]',
-    );
-    const addGuestButton = card.querySelector('[data-action="add-guest"]');
-    const registeredSelect = card.querySelector(
-      '[data-role="registered-user"]',
-    );
-    const addRegisteredButton = card.querySelector(
-      '[data-action="add-registered"]',
-    );
+      const listContainer = card.querySelector('[data-role="signup-list"]');
+      const statusText = card.querySelector('[data-role="card-status"]');
+      const nameInput = card.querySelector('[data-role="guest-name"]');
+      const emailInput = card.querySelector('[data-role="guest-email"]');
+      const toggleButton = card.querySelector(
+        '[data-action="toggle-availability"]',
+      );
+      const addGuestButton = card.querySelector('[data-action="add-guest"]');
+      const registeredSelect = card.querySelector(
+        '[data-role="registered-user"]',
+      );
+      const addRegisteredButton = card.querySelector(
+        '[data-action="add-registered"]',
+      );
 
-    if (registeredSelect) {
-      adminUsersCache.forEach((user) => {
-        const option = document.createElement("option");
-        option.value = user.email;
-        option.textContent = `${user.fullName || "Nevtelen"} (${user.email})`;
-        registeredSelect.appendChild(option);
-      });
-    }
-
-    if (listContainer) {
-      if (signups.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "notice";
-        empty.textContent = "Még nincs feliratkozó.";
-        listContainer.appendChild(empty);
-      } else {
-        signups.forEach((signup) => {
-          const row = document.createElement("div");
-          row.className = "notice";
-          row.innerHTML = `
-            <strong>${signup.name}</strong> (${signup.email})
-          `;
-          const removeButton = document.createElement("button");
-          removeButton.className = "ghost";
-          removeButton.textContent = "Törlés";
-          removeButton.addEventListener("click", () =>
-            cancelAdminSignup(signup.id, statusText),
-          );
-          row.appendChild(removeButton);
-          listContainer.appendChild(row);
+      if (registeredSelect) {
+        adminUsersCache.forEach((user) => {
+          const option = document.createElement("option");
+          option.value = user.email;
+          option.textContent = `${user.fullName || "Nevtelen"} (${user.email})`;
+          registeredSelect.appendChild(option);
         });
       }
-    }
 
-    toggleButton?.addEventListener("click", () =>
-      toggleClassAvailability(item.id, item.isActive === false, statusText),
-    );
-
-    addGuestButton?.addEventListener("click", () => {
-      if (isFull) {
-        setCardStatus(statusText, "Az óra betelt (max 6 fő).");
-        return;
+      if (listContainer) {
+        if (signups.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "notice";
+          empty.textContent = "Még nincs feliratkozó.";
+          listContainer.appendChild(empty);
+        } else {
+          signups.forEach((signup) => {
+            const row = document.createElement("div");
+            row.className = "notice";
+            row.innerHTML = `
+            <strong>${signup.name}</strong> (${signup.email})
+          `;
+            const removeButton = document.createElement("button");
+            removeButton.className = "ghost";
+            removeButton.textContent = "Törlés";
+            removeButton.addEventListener("click", () =>
+              cancelAdminSignup(signup.id, statusText),
+            );
+            row.appendChild(removeButton);
+            listContainer.appendChild(row);
+          });
+        }
       }
-      const name = nameInput ? nameInput.value.trim() : "";
-      const email = emailInput ? emailInput.value.trim() : "";
-      addGuestToClass(
-        item.id,
-        name,
-        email,
-        signups,
-        statusText,
-        nameInput,
-        emailInput,
+
+      toggleButton?.addEventListener("click", () =>
+        toggleClassAvailability(item.id, item.isActive === false, statusText),
       );
-    });
 
-    addRegisteredButton?.addEventListener("click", () => {
-      if (isFull) {
-        setCardStatus(statusText, "Az óra betelt (max 6 fő).");
-        return;
+      addGuestButton?.addEventListener("click", () => {
+        if (isFull) {
+          setCardStatus(statusText, "Az óra betelt (max 6 fő).");
+          return;
+        }
+        const name = nameInput ? nameInput.value.trim() : "";
+        const email = emailInput ? emailInput.value.trim() : "";
+        addGuestToClass(
+          item.id,
+          name,
+          email,
+          signups,
+          statusText,
+          nameInput,
+          emailInput,
+        );
+      });
+
+      addRegisteredButton?.addEventListener("click", () => {
+        if (isFull) {
+          setCardStatus(statusText, "Az óra betelt (max 6 fő).");
+          return;
+        }
+        const userEmail = registeredSelect ? registeredSelect.value.trim() : "";
+        addRegisteredUserToClass(item.id, userEmail, statusText);
+      });
+
+      if (addGuestButton) {
+        addGuestButton.disabled = isFull;
       }
-      const userEmail = registeredSelect ? registeredSelect.value.trim() : "";
-      addRegisteredUserToClass(item.id, userEmail, statusText);
+      if (addRegisteredButton) {
+        addRegisteredButton.disabled = isFull;
+      }
+      adminClassList.appendChild(card);
     });
-
-    if (addGuestButton) {
-      addGuestButton.disabled = isFull;
-    }
-    if (addRegisteredButton) {
-      addRegisteredButton.disabled = isFull;
-    }
-    adminClassList.appendChild(card);
-  });
 };
 
 const setCardStatus = (element, message) => {
@@ -851,6 +872,7 @@ const renderMySignups = (signups) => {
     return;
   }
   mySignups.hidden = false;
+  const now = new Date();
   signups.forEach((item) => {
     if (item.status === "confirmed") {
       mySignupByClass.set(item.classId, item.id);
@@ -868,6 +890,15 @@ const renderMySignups = (signups) => {
       cancelButton.addEventListener("click", () => cancelSignup(item.id));
       row.appendChild(document.createElement("br"));
       row.appendChild(cancelButton);
+    }
+    if (item.status === "confirmed" && new Date(item.startsAt) > now) {
+      const calendarButton = document.createElement("a");
+      calendarButton.className = "ghost";
+      calendarButton.href = `/api/signups/${item.id}/calendar.ics`;
+      calendarButton.textContent = "iPhone/Apple naptárba";
+      calendarButton.setAttribute("download", `edzes-${item.id}.ics`);
+      row.appendChild(document.createElement("br"));
+      row.appendChild(calendarButton);
     }
     mySignupsList.appendChild(row);
   });
@@ -887,6 +918,7 @@ const renderSignupsMenu = () => {
     signupsList.innerHTML = '<div class="notice">Nincs feliratkozásod.</div>';
     return;
   }
+  const now = new Date();
   mySignupsCache.forEach((item) => {
     const row = document.createElement("div");
     row.className = "notice signups-row";
@@ -901,6 +933,15 @@ const renderSignupsMenu = () => {
       cancelButton.addEventListener("click", () => cancelSignup(item.id));
       row.appendChild(document.createElement("br"));
       row.appendChild(cancelButton);
+    }
+    if (item.status === "confirmed" && new Date(item.startsAt) > now) {
+      const calendarButton = document.createElement("a");
+      calendarButton.className = "ghost";
+      calendarButton.href = `/api/signups/${item.id}/calendar.ics`;
+      calendarButton.textContent = "iPhone/Apple naptárba";
+      calendarButton.setAttribute("download", `edzes-${item.id}.ics`);
+      row.appendChild(document.createElement("br"));
+      row.appendChild(calendarButton);
     }
     signupsList.appendChild(row);
   });
@@ -1003,7 +1044,30 @@ const updatePassClassOptions = () => {
     return;
   }
   passClassSelect.innerHTML = "";
-  adminClassesCache.forEach((item) => {
+  const now = getBudapestNow();
+  const earliest = new Date(now);
+  earliest.setHours(0, 0, 0, 0);
+  earliest.setDate(earliest.getDate() - 7);
+  const eligibleClasses = adminClassesCache
+    .filter((item) => {
+      const startsAt = toBudapestDate(item.startsAt);
+      return (
+        startsAt <= now &&
+        startsAt >= earliest &&
+        !isFridayDisabledClass(item.startsAt)
+      );
+    })
+    .sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt));
+
+  if (eligibleClasses.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Nincs alkalom az elmúlt 7 napból";
+    passClassSelect.appendChild(option);
+    return;
+  }
+
+  eligibleClasses.forEach((item) => {
     const option = document.createElement("option");
     option.value = String(item.id);
     option.textContent = `${item.title} - ${formatDate(item.startsAt)}`;
@@ -1309,6 +1373,7 @@ const loadUser = async () => {
     if (!response.ok) {
       currentUser = null;
       updateUserUI();
+      renderCalendarSync(null);
       renderMySignups([]);
       renderSignupsMenu();
       return;
@@ -1316,13 +1381,92 @@ const loadUser = async () => {
     const data = await response.json();
     currentUser = data.user;
     updateUserUI();
+    await loadCalendarSyncStatus();
     await loadMySignups();
   } catch (err) {
     currentUser = null;
     updateUserUI();
+    renderCalendarSync(null);
     renderMySignups([]);
     renderSignupsMenu();
   }
+};
+
+const renderCalendarSync = (status) => {
+  if (!calendarSync || !calendarSyncStatus) {
+    return;
+  }
+  if (!currentUser) {
+    calendarSync.hidden = true;
+    return;
+  }
+  calendarSync.hidden = false;
+  if (!status) {
+    calendarSyncStatus.textContent = "Naptárkapcsolat állapot betöltése...";
+    if (connectGoogleCalendarButton) {
+      connectGoogleCalendarButton.disabled = true;
+      connectGoogleCalendarButton.hidden = false;
+    }
+    if (disconnectGoogleCalendarButton) {
+      disconnectGoogleCalendarButton.hidden = true;
+      disconnectGoogleCalendarButton.disabled = true;
+    }
+    return;
+  }
+
+  if (!status.configured) {
+    calendarSyncStatus.textContent =
+      "Google Naptár nincs konfigurálva a szerveren.";
+    if (connectGoogleCalendarButton) {
+      connectGoogleCalendarButton.disabled = true;
+      connectGoogleCalendarButton.hidden = false;
+    }
+    if (disconnectGoogleCalendarButton) {
+      disconnectGoogleCalendarButton.hidden = true;
+      disconnectGoogleCalendarButton.disabled = true;
+    }
+    return;
+  }
+
+  if (status.connected) {
+    calendarSyncStatus.textContent =
+      "Google Naptár kapcsolva. Feliratkozáskor automatikusan hozzáad, lemondáskor töröl.";
+    if (connectGoogleCalendarButton) {
+      connectGoogleCalendarButton.hidden = true;
+      connectGoogleCalendarButton.disabled = false;
+    }
+    if (disconnectGoogleCalendarButton) {
+      disconnectGoogleCalendarButton.hidden = false;
+      disconnectGoogleCalendarButton.disabled = false;
+    }
+    return;
+  }
+
+  calendarSyncStatus.textContent =
+    "Google Naptár nincs összekapcsolva. Kattints az összekapcsolásra, vagy használd az iPhone/Apple naptár gombot a feliratkozásoknál.";
+  if (connectGoogleCalendarButton) {
+    connectGoogleCalendarButton.hidden = false;
+    connectGoogleCalendarButton.disabled = false;
+  }
+  if (disconnectGoogleCalendarButton) {
+    disconnectGoogleCalendarButton.hidden = true;
+    disconnectGoogleCalendarButton.disabled = true;
+  }
+};
+
+const loadCalendarSyncStatus = async () => {
+  if (!currentUser) {
+    renderCalendarSync(null);
+    return;
+  }
+  renderCalendarSync(null);
+  const response = await fetch("/api/calendar/google/status");
+  if (!response.ok) {
+    renderCalendarSync({ configured: false, connected: false });
+    return;
+  }
+  const status = await response.json();
+  renderCalendarSync(status);
 };
 
 const updateUserUI = () => {
@@ -1352,6 +1496,26 @@ const updateUserUI = () => {
   signupName.disabled = true;
   signupEmail.disabled = true;
   signupLoginButton.hidden = !!currentUser;
+  if (!currentUser) {
+    renderCalendarSync(null);
+  }
+};
+
+const handleCalendarCallbackStatus = () => {
+  const params = new URLSearchParams(window.location.search);
+  const calendarStatus = params.get("calendar");
+  if (!calendarStatus) {
+    return;
+  }
+  if (calendarStatus === "connected") {
+    userLoginMessage.textContent = "Google Naptár sikeresen összekapcsolva.";
+  } else if (calendarStatus === "not-configured") {
+    userLoginMessage.textContent = "Google Naptár nincs konfigurálva.";
+  } else {
+    userLoginMessage.textContent = "Google Naptár kapcsolás sikertelen.";
+  }
+  const cleanUrl = window.location.pathname;
+  window.history.replaceState({}, document.title, cleanUrl);
 };
 
 const setAuthMode = (mode) => {
@@ -1473,6 +1637,7 @@ userLoginForm.addEventListener("submit", async (event) => {
   const data = await response.json();
   currentUser = data.user;
   updateUserUI();
+  await loadCalendarSyncStatus();
   userLoginMessage.textContent =
     authMode === "register" ? "Sikeres regisztráció." : "Sikeres belépés.";
   closeModal(userModal);
@@ -1517,7 +1682,7 @@ adminLogout.addEventListener("click", async () => {
 
 regenerateClassesButton?.addEventListener("click", async () => {
   const confirmed = window.confirm(
-    "Biztosan újragenerálod a heti órákat? Ez minden feliratkozást és bérlet alkalmat töröl.",
+    "Biztosan újragenerálod a heti órákat? A bérlet és a meglévő feliratkozások dátumai megmaradnak, csak az üres jövőbeli órák frissülnek.",
   );
   if (!confirmed) {
     return;
@@ -1584,6 +1749,7 @@ openUser.addEventListener("click", async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     currentUser = null;
     updateUserUI();
+    renderCalendarSync(null);
     renderMySignups([]);
     renderSignupsMenu();
     return;
@@ -1711,6 +1877,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("DOMContentLoaded", () => {
+  handleCalendarCallbackStatus();
   loadClasses();
   loadUser();
   setAuthMode("login");
@@ -1723,6 +1890,59 @@ window.addEventListener("DOMContentLoaded", () => {
   if (shouldOpenAdminFromUrl()) {
     openAdminLogin();
   }
+});
+
+connectGoogleCalendarButton?.addEventListener("click", async () => {
+  if (calendarSyncLoading) {
+    return;
+  }
+  calendarSyncLoading = true;
+  if (calendarSyncStatus) {
+    calendarSyncStatus.textContent = "Google kapcsolat indítása...";
+  }
+  const response = await fetch("/api/calendar/google/connect");
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    if (calendarSyncStatus) {
+      calendarSyncStatus.textContent =
+        err.error || "Nem sikerült elindítani a kapcsolódást.";
+    }
+    calendarSyncLoading = false;
+    return;
+  }
+  const data = await response.json();
+  if (!data.url) {
+    if (calendarSyncStatus) {
+      calendarSyncStatus.textContent = "Hiányzó kapcsolódási URL.";
+    }
+    calendarSyncLoading = false;
+    return;
+  }
+  window.location.href = data.url;
+});
+
+disconnectGoogleCalendarButton?.addEventListener("click", async () => {
+  if (calendarSyncLoading) {
+    return;
+  }
+  calendarSyncLoading = true;
+  if (calendarSyncStatus) {
+    calendarSyncStatus.textContent = "Google kapcsolat bontása...";
+  }
+  const response = await fetch("/api/calendar/google/disconnect", {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    if (calendarSyncStatus) {
+      calendarSyncStatus.textContent =
+        err.error || "Nem sikerült bontani a kapcsolatot.";
+    }
+    calendarSyncLoading = false;
+    return;
+  }
+  await loadCalendarSyncStatus();
+  calendarSyncLoading = false;
 });
 
 userPhone?.addEventListener("input", () => {

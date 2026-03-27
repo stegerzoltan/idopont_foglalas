@@ -247,6 +247,14 @@ button, input, textarea {
   background: radial-gradient(circle, rgba(30, 136, 229, 0.15), transparent 70%);
 }
 
+.calendar-sync {
+  margin-top: 0.9rem;
+  padding: 0.85rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(196, 90, 42, 0.2);
+}
+
 .section-title {
   padding: 0 5vw;
   margin-top: 2rem;

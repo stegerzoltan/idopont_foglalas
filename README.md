@@ -28,6 +28,20 @@ Alapbol a szerver a http://localhost:3000 cimen fut.
 
 Az admin belepeshez a `.env` fajlban add meg az `ADMIN_EMAIL` es `ADMIN_PASSWORD` erteket.
 
+## Google Naptar automatikus szinkron
+
+Automatikus naptar-hozzaadas/torles Google Naptarral OAuth kapcsolaton keresztul mukodik.
+
+Szukseges `.env` valtozok:
+
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_REDIRECT_URI` (pl. `http://localhost:3000/api/calendar/google/callback`)
+
+Google Cloudban az OAuth kliensnel ezt a redirect URI-t engedelyezni kell.
+
+Ha a felhasznalo nem koti ossze a Google Naptarat, iPhone/Apple eszkozokon a feliratkozasoknal elerheto `iPhone/Apple naptarba` gombbal `.ics` fajlkent hozzaadhato az ora.
+
 ## Funkciok
 
 - Publikus ora lista (mobilbarat)
