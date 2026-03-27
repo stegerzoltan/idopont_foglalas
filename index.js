@@ -1,3 +1,5 @@
+// ...existing code...
+
 // Admin: adott user-hez, adott órához alkalom (pass use) hozzáadása
 app.post("/api/admin/passes/use", requireAdmin, async (req, res) => {
   const { userEmail, classId } = req.body;
@@ -19,11 +21,9 @@ app.post("/api/admin/passes/use", requireAdmin, async (req, res) => {
       [pass.id, classId],
     );
     if (existing) {
-      return res
-        .status(400)
-        .json({
-          error: "Ehhez az órához már van rögzített alkalom ezen a bérleten",
-        });
+      return res.status(400).json({
+        error: "Ehhez az órához már van rögzített alkalom ezen a bérleten",
+      });
     }
     // pass_uses beszúrás
     const usedAt = new Date().toISOString();
