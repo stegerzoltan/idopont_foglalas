@@ -1,3 +1,48 @@
+// Admin: adott user-hez, adott órához alkalom (pass use) hozzáadása
+app.post("/api/admin/passes/use", requireAdmin, async (req, res) => {
+  const { userEmail, classId } = req.body;
+  if (!userEmail || !classId) {
+    return res.status(400).json({ error: "userEmail és classId kötelező" });
+  }
+  try {
+    // Legutóbbi, még felhasználható bérlet keresése
+    const pass = await dbGetAsync(
+      "SELECT * FROM passes WHERE user_email = ? AND remaining > 0 ORDER BY created_at DESC LIMIT 1",
+      [userEmail],
+    );
+    if (!pass) {
+      return res.status(400).json({ error: "Nincs felhasználható bérlet" });
+    }
+    // Ellenőrizzük, hogy már van-e ilyen pass_use
+    const existing = await dbGetAsync(
+      "SELECT * FROM pass_uses WHERE pass_id = ? AND class_id = ?",
+      [pass.id, classId],
+    );
+    if (existing) {
+      return res
+        .status(400)
+        .json({
+          error: "Ehhez az órához már van rögzített alkalom ezen a bérleten",
+        });
+    }
+    // pass_uses beszúrás
+    const usedAt = new Date().toISOString();
+    await dbRunAsync(
+      "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
+      [pass.id, classId, usedAt],
+    );
+    // passes.remaining csökkentése
+    await dbRunAsync(
+      "UPDATE passes SET remaining = remaining - 1 WHERE id = ?",
+      [pass.id],
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ error: "Szerver hiba", details: err.message || err });
+  }
+});
 require("dotenv").config();
 process.env.TZ = process.env.TZ || "Europe/Budapest";
 const path = require("path");
@@ -979,6 +1024,28 @@ app.get("/api/classes", (req, res) => {
   );
 });
 
+// ÚJ: Admin - elmúlt 7 nap összes órája (signuptól függetlenül)
+app.get("/api/admin/classes/last7days", requireAdmin, (req, res) => {
+  const now = new Date();
+  const from = new Date(now);
+  from.setDate(now.getDate() - 7);
+  db.all(
+    `SELECT c.*, (
+        SELECT COUNT(*) FROM signups s WHERE s.class_id = c.id AND s.status = 'confirmed'
+      ) AS confirmed_count
+      FROM classes c
+      WHERE c.starts_at >= ? AND c.starts_at <= ?
+      ORDER BY c.starts_at DESC`,
+    [from.toISOString(), now.toISOString()],
+    (err, rows) => {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      return res.json(rows || []);
+    },
+  );
+});
+
 app.post("/api/auth/register", (req, res) => {
   const {
     fullName,
@@ -1220,11 +1287,9 @@ app.get("/api/signups/:id/calendar.ics", requireUser, (req, res) => {
         return res.status(404).json({ error: "Signup not found" });
       }
       if (row.status !== "confirmed") {
-        return res
-          .status(400)
-          .json({
-            error: "Csak megerositett feliratkozashoz toltheto le naptar.",
-          });
+        return res.status(400).json({
+          error: "Csak megerositett feliratkozashoz toltheto le naptar.",
+        });
       }
 
       const startsAt = new Date(row.starts_at);
