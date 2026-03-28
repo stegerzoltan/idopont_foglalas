@@ -892,25 +892,10 @@ const renderMySignups = (signups) => {
       row.appendChild(cancelButton);
     }
     if (item.status === "confirmed" && new Date(item.startsAt) > now) {
-      const googleCalendarButton = document.createElement("button");
-      googleCalendarButton.className = "ghost";
-      googleCalendarButton.textContent = "Google naptárba";
-      googleCalendarButton.addEventListener("click", () => {
-        if (item.calendarProvider === "google") {
-          alert("Ez az időpont már hozzáadva van a Google naptárodhoz.");
-        } else {
-          alert(
-            "Naptár szinkronizáláshoz csatlakozz a Google fiókodhoz a fenti gombbal.",
-          );
-        }
-      });
-      row.appendChild(document.createElement("br"));
-      row.appendChild(googleCalendarButton);
-
       const calendarButton = document.createElement("a");
       calendarButton.className = "ghost";
       calendarButton.href = `/api/signups/${item.id}/calendar.ics`;
-      calendarButton.textContent = "iPhone/Apple naptárba";
+      calendarButton.textContent = "Naptárba fájl letöltése";
       calendarButton.setAttribute("download", `edzes-${item.id}.ics`);
       row.appendChild(document.createElement("br"));
       row.appendChild(calendarButton);
@@ -950,25 +935,10 @@ const renderSignupsMenu = () => {
       row.appendChild(cancelButton);
     }
     if (item.status === "confirmed" && new Date(item.startsAt) > now) {
-      const googleCalendarButton = document.createElement("button");
-      googleCalendarButton.className = "ghost";
-      googleCalendarButton.textContent = "Google naptárba";
-      googleCalendarButton.addEventListener("click", () => {
-        if (item.calendarProvider === "google") {
-          alert("Ez az időpont már hozzáadva van a Google naptárodhoz.");
-        } else {
-          alert(
-            "Naptár szinkronizáláshoz csatlakozz a Google fiókodhoz a fenti gombbal.",
-          );
-        }
-      });
-      row.appendChild(document.createElement("br"));
-      row.appendChild(googleCalendarButton);
-
       const calendarButton = document.createElement("a");
       calendarButton.className = "ghost";
       calendarButton.href = `/api/signups/${item.id}/calendar.ics`;
-      calendarButton.textContent = "iPhone/Apple naptárba";
+      calendarButton.textContent = "Naptárba fájl letöltése";
       calendarButton.setAttribute("download", `edzes-${item.id}.ics`);
       row.appendChild(document.createElement("br"));
       row.appendChild(calendarButton);
