@@ -173,11 +173,15 @@ const initDb = async () => {
         starts_at TEXT NOT NULL,
         capacity INTEGER NOT NULL,
         notes TEXT,
+        location TEXT,
         is_active INTEGER NOT NULL DEFAULT 1
       )`,
     );
     await pgPool.query(
       "ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1",
+    );
+    await pgPool.query(
+      "ALTER TABLE classes ADD COLUMN IF NOT EXISTS location TEXT",
     );
     await pgPool.query(
       `CREATE TABLE IF NOT EXISTS signups (
@@ -270,6 +274,7 @@ const initDb = async () => {
           starts_at TEXT NOT NULL,
           capacity INTEGER NOT NULL,
           notes TEXT,
+          location TEXT,
           is_active INTEGER NOT NULL DEFAULT 1
         )`,
       );
@@ -357,6 +362,7 @@ const initDb = async () => {
         "ALTER TABLE classes ADD COLUMN is_active INTEGER DEFAULT 1",
         () => {},
       );
+      db.run("ALTER TABLE classes ADD COLUMN location TEXT", () => {});
       db.run("SELECT 1", () => resolve());
     });
   });
@@ -598,7 +604,7 @@ const createGoogleCalendarEventForSignup = async ({
   );
 
   const eventPayload = {
-    summary: classRow.title || "Edzes",
+    summary: classRow.title || "Edzés MuscleFit",
     description: [
       classRow.coach ? `Edzo: ${classRow.coach}` : null,
       fullName ? `Resztvevo: ${fullName}` : null,
@@ -615,6 +621,10 @@ const createGoogleCalendarEventForSignup = async ({
       timeZone: "Europe/Budapest",
     },
   };
+
+  if (classRow.location) {
+    eventPayload.location = classRow.location;
+  }
 
   const calendarId = encodeURIComponent(
     activeConnection.calendar_id || GOOGLE_DEFAULT_CALENDAR_ID,
@@ -694,7 +704,14 @@ const toIcsUtc = (date) => {
     .replace(/\.\d{3}Z$/, "Z");
 };
 
-const buildSignupIcs = ({ uid, title, description, startsAt, endsAt }) => {
+const buildSignupIcs = ({
+  uid,
+  title,
+  description,
+  startsAt,
+  endsAt,
+  location,
+}) => {
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -708,10 +725,11 @@ const buildSignupIcs = ({ uid, title, description, startsAt, endsAt }) => {
     `DTEND:${toIcsUtc(endsAt)}`,
     `SUMMARY:${escapeIcsText(title)}`,
     `DESCRIPTION:${escapeIcsText(description)}`,
-    "STATUS:CONFIRMED",
-    "END:VEVENT",
-    "END:VCALENDAR",
   ];
+  if (location) {
+    lines.push(`LOCATION:${escapeIcsText(location)}`);
+  }
+  lines.push("STATUS:CONFIRMED", "END:VEVENT", "END:VCALENDAR");
   return `${lines.join("\\r\\n")}\\r\\n`;
 };
 
@@ -836,7 +854,7 @@ const seedWeeklyClasses = () => {
       });
 
       const stmt = db.prepare(
-        "INSERT INTO classes (title, coach, starts_at, capacity, notes) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO classes (title, coach, starts_at, capacity, notes, location) VALUES (?, ?, ?, ?, ?, ?)",
       );
 
       WEEK_DAYS.forEach((day) => {
@@ -851,7 +869,14 @@ const seedWeeklyClasses = () => {
           const startsAt = new Date(weekStart);
           startsAt.setDate(weekStart.getDate() + (day.key - 1));
           startsAt.setHours(hour, minute, 0, 0);
-          stmt.run("Edzes", "Zoltan", startsAt.toISOString(), MAX_SIGNUPS, "");
+          stmt.run(
+            "Edzés MuscleFit",
+            "Zoltan",
+            startsAt.toISOString(),
+            MAX_SIGNUPS,
+            "",
+            "5700 Gyula, Csabai út 3.",
+          );
         });
       });
 
@@ -1229,7 +1254,7 @@ app.get("/api/signups/:id/calendar.ics", requireUser, (req, res) => {
   const signupId = Number(req.params.id);
   const email = req.session.user.email;
   db.get(
-    `SELECT s.id, s.status, s.email, c.id AS class_id, c.title, c.coach, c.starts_at
+    `SELECT s.id, s.status, s.email, c.id AS class_id, c.title, c.coach, c.starts_at, c.location
      FROM signups s
      JOIN classes c ON s.class_id = c.id
      WHERE s.id = ? AND s.email = ?`,
@@ -1261,10 +1286,11 @@ app.get("/api/signups/:id/calendar.ics", requireUser, (req, res) => {
         .join("\\n");
       const ics = buildSignupIcs({
         uid,
-        title: row.title || "Edzes",
+        title: row.title || "Edzés MuscleFit",
         description,
         startsAt,
         endsAt,
+        location: row.location,
       });
 
       res.setHeader("Content-Type", "text/calendar; charset=utf-8");
