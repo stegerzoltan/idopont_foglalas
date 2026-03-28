@@ -73,6 +73,7 @@ const passTotalInput = document.getElementById("pass-total");
 const passRemainingInput = document.getElementById("pass-remaining");
 const savePassAdminButton = document.getElementById("save-pass-admin");
 const passClassSelect = document.getElementById("pass-class-select");
+const passUseDate = document.getElementById("pass-use-date");
 const addPassUseButton = document.getElementById("add-pass-use");
 const passUsesAdmin = document.getElementById("pass-uses-admin");
 const passAdminStatus = document.getElementById("pass-admin-status");
@@ -1324,10 +1325,22 @@ const addPassUse = async () => {
     passAdminStatus.textContent = "Email és óra kiválasztása kötelező.";
     return;
   }
+
+  let usedAt = null;
+  if (passUseDate && passUseDate.value) {
+    const dateObj = new Date(passUseDate.value);
+    usedAt = dateObj.toISOString();
+  }
+
+  const body = { email, classId };
+  if (usedAt) {
+    body.used_at = usedAt;
+  }
+
   const response = await fetch("/api/admin/passes/use", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, classId }),
+    body: JSON.stringify(body),
   });
   if (handleAdminUnauthorized(response)) {
     return;
@@ -1338,6 +1351,9 @@ const addPassUse = async () => {
     return;
   }
   passAdminStatus.textContent = "Alkalom hozzáadva.";
+  if (passUseDate) {
+    passUseDate.value = "";
+  }
   await loadAdminPass();
 };
 

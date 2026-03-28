@@ -1757,7 +1757,7 @@ app.post("/api/admin/passes/set", requireAdmin, (req, res) => {
 });
 
 app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
-  const { email, classId } = req.body;
+  const { email, classId, used_at } = req.body;
   if (!email || !classId) {
     return res.status(400).json({ error: "Email and classId required" });
   }
@@ -1781,21 +1781,26 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
           if (!classRow) {
             return res.status(404).json({ error: "Class not found" });
           }
-          const classStart = new Date(classRow.starts_at);
-          const now = new Date();
-          const earliest = new Date(now);
-          earliest.setHours(0, 0, 0, 0);
-          earliest.setDate(earliest.getDate() - PASS_USE_BACKDATE_DAYS);
-          if (classStart > now) {
-            return res
-              .status(400)
-              .json({ error: "Csak lezajlott orara adhato alkalom." });
+
+          // Ha nincs megadott dátum, akkor az alapértelmezett validálást végezzük
+          if (!used_at) {
+            const classStart = new Date(classRow.starts_at);
+            const now = new Date();
+            const earliest = new Date(now);
+            earliest.setHours(0, 0, 0, 0);
+            earliest.setDate(earliest.getDate() - PASS_USE_BACKDATE_DAYS);
+            if (classStart > now) {
+              return res
+                .status(400)
+                .json({ error: "Csak lezajlott orara adhato alkalom." });
+            }
+            if (classStart < earliest) {
+              return res.status(400).json({
+                error: "Csak az elmult 7 nap oraihoz adhato alkalom.",
+              });
+            }
           }
-          if (classStart < earliest) {
-            return res.status(400).json({
-              error: "Csak az elmult 7 nap oraihoz adhato alkalom.",
-            });
-          }
+
           db.get(
             `SELECT pu.id
              FROM pass_uses pu
@@ -1812,7 +1817,7 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
                   .status(400)
                   .json({ error: "Ez az alkalom mar levonva." });
               }
-              const usedAt = new Date().toISOString();
+              const usedAt = used_at || new Date().toISOString();
               db.run(
                 "UPDATE passes SET remaining = remaining - 1 WHERE id = ? AND remaining > 0",
                 [passRow.id],
