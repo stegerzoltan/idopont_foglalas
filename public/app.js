@@ -1050,25 +1050,16 @@ const updatePassClassOptions = () => {
     return;
   }
   passClassSelect.innerHTML = "";
-  const now = getBudapestNow();
-  const earliest = new Date(now);
-  earliest.setHours(0, 0, 0, 0);
-  earliest.setDate(earliest.getDate() - 7);
+
+  // Show all past and upcoming classes since admin can set custom dates
   const eligibleClasses = adminClassesCache
-    .filter((item) => {
-      const startsAt = toBudapestDate(item.startsAt);
-      return (
-        startsAt <= now &&
-        startsAt >= earliest &&
-        !isFridayDisabledClass(item.startsAt)
-      );
-    })
+    .filter((item) => !isFridayDisabledClass(item.startsAt))
     .sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt));
 
   if (eligibleClasses.length === 0) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "Nincs alkalom az elmúlt 7 napból";
+    option.textContent = "Nincs elérhető óra";
     passClassSelect.appendChild(option);
     return;
   }

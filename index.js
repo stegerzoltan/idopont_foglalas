@@ -1782,33 +1782,7 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
             return res.status(404).json({ error: "Class not found" });
           }
 
-          // Ha nincs megadott dátum, akkor az alapértelmezett validálást végezzük
-          if (!used_at) {
-            const classStart = new Date(classRow.starts_at);
-            const now = new Date();
-            const earliest = new Date(now);
-            earliest.setHours(0, 0, 0, 0);
-            earliest.setDate(earliest.getDate() - PASS_USE_BACKDATE_DAYS);
-            if (classStart > now) {
-              return res
-                .status(400)
-                .json({ error: "Csak lezajlott orara adhato alkalom." });
-            }
-            if (classStart < earliest) {
-              return res.status(400).json({
-                error: "Csak az elmult 7 nap oraihoz adhato alkalom.",
-              });
-            }
-          }
-
-          db.get(
-            `SELECT pu.id
-             FROM pass_uses pu
-             JOIN passes p ON pu.pass_id = p.id
-             WHERE p.user_email = ? AND pu.class_id = ?
-             LIMIT 1`,
-            [email, classId],
-            (useErr, useRow) => {
+          // Only validate date constraints if no custom used_at date is provided
               if (useErr) {
                 return res.status(500).json({ error: "Database error" });
               }
