@@ -72,7 +72,7 @@ const assignPassButton = document.getElementById("assign-pass");
 const passTotalInput = document.getElementById("pass-total");
 const passRemainingInput = document.getElementById("pass-remaining");
 const savePassAdminButton = document.getElementById("save-pass-admin");
-const passUseClassId = document.getElementById("pass-use-class-id");
+const passClassSelect = document.getElementById("pass-class-select");
 const passUseDate = document.getElementById("pass-use-date");
 const addPassUseButton = document.getElementById("add-pass-use");
 const passUsesAdmin = document.getElementById("pass-uses-admin");
@@ -1046,7 +1046,30 @@ const loadAdminData = async () => {
 };
 
 const updatePassClassOptions = () => {
-  // Class options are now managed via direct ID input
+  if (!passClassSelect) {
+    return;
+  }
+  passClassSelect.innerHTML = "";
+
+  // Show all past and upcoming classes since admin can set custom dates
+  const eligibleClasses = adminClassesCache
+    .filter((item) => !isFridayDisabledClass(item.startsAt))
+    .sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt));
+
+  if (eligibleClasses.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Nincs elérhető óra";
+    passClassSelect.appendChild(option);
+    return;
+  }
+
+  eligibleClasses.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = String(item.id);
+    option.textContent = `${item.title} - ${formatDate(item.startsAt)}`;
+    passClassSelect.appendChild(option);
+  });
 };
 
 const renderAdminPass = (data) => {
@@ -1284,13 +1307,13 @@ const saveAdminPass = async () => {
 };
 
 const addPassUse = async () => {
-  if (!passAdminEmail || !passUseClassId || !passUseDate) {
+  if (!passAdminEmail || !passClassSelect) {
     return;
   }
   const email = passAdminEmail.value.trim();
-  const classId = Number(passUseClassId.value);
+  const classId = passClassSelect.value;
   if (!email || !classId) {
-    passAdminStatus.textContent = "Email és óra ID kötelező.";
+    passAdminStatus.textContent = "Email és óra kiválasztása kötelező.";
     return;
   }
 
@@ -1319,9 +1342,6 @@ const addPassUse = async () => {
     return;
   }
   passAdminStatus.textContent = "Alkalom hozzáadva.";
-  if (passUseClassId) {
-    passUseClassId.value = "";
-  }
   if (passUseDate) {
     passUseDate.value = "";
   }
