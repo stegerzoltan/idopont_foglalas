@@ -730,7 +730,7 @@ const buildSignupIcs = ({
     lines.push(`LOCATION:${escapeIcsText(location)}`);
   }
   lines.push("STATUS:CONFIRMED", "END:VEVENT", "END:VCALENDAR");
-  return `${lines.join("\\r\\n")}\\r\\n`;
+  return lines.join("\r\n") + "\r\n";
 };
 
 const WEEK_DAYS = [
@@ -1328,7 +1328,7 @@ app.get("/api/passes/me", requireUser, (req, res) => {
       db.all(
         `SELECT pu.id, pu.used_at, c.title, c.starts_at
          FROM pass_uses pu
-         JOIN classes c ON pu.class_id = c.id
+         LEFT JOIN classes c ON pu.class_id = c.id
          WHERE pu.pass_id = ?
          ORDER BY pu.used_at DESC`,
         [passRow.id],
@@ -1674,7 +1674,7 @@ app.get("/api/admin/passes/:email", requireAdmin, (req, res) => {
       db.all(
         `SELECT pu.id, pu.used_at, c.title, c.starts_at
          FROM pass_uses pu
-         JOIN classes c ON pu.class_id = c.id
+         LEFT JOIN classes c ON pu.class_id = c.id
          WHERE pu.pass_id = ?
          ORDER BY pu.used_at DESC`,
         [passRow.id],
