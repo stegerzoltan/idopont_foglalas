@@ -1051,8 +1051,8 @@ const updatePassClassOptions = async () => {
   }
   passClassSelect.innerHTML = "";
 
-  // Fetch all classes directly (not limited to 7 days)
-  const response = await fetch("/api/classes");
+  // Fetch all classes directly without any time restrictions
+  const response = await fetch("/api/admin/all-classes");
   if (!response.ok) {
     const option = document.createElement("option");
     option.value = "";

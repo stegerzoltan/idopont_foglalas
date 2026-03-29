@@ -1004,6 +1004,16 @@ app.get("/api/classes", (req, res) => {
   );
 });
 
+app.get("/api/admin/all-classes", requireAdmin, (req, res) => {
+  db.all("SELECT * FROM classes ORDER BY starts_at ASC", [], (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: "Database error" });
+    }
+    const payload = (rows || []).map((row) => mapClassRow(row));
+    return res.json(payload);
+  });
+});
+
 // ÚJ: Admin - elmúlt 7 nap összes órája (signuptól függetlenül)
 app.get("/api/admin/classes/last7days", requireAdmin, (req, res) => {
   const now = new Date();
