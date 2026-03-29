@@ -1032,7 +1032,7 @@ const loadAdminData = async () => {
   const users = await usersResponse.json();
   adminClassesCache = classes;
   adminUsersCache = Array.isArray(users) ? users : [];
-  updatePassClassOptions();
+  await updatePassClassOptions();
   renderAdminClasses(filterClassesToDisplayWeek(classes));
   setAdminClassVisibility(adminClassesOpen);
   renderNotifications(notifications);
@@ -1045,14 +1045,26 @@ const loadAdminData = async () => {
   }
 };
 
-const updatePassClassOptions = () => {
+const updatePassClassOptions = async () => {
   if (!passClassSelect) {
     return;
   }
   passClassSelect.innerHTML = "";
 
+  // Fetch all classes directly (not limited to 7 days)
+  const response = await fetch("/api/classes");
+  if (!response.ok) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Nem sikerült betölteni az órákat";
+    passClassSelect.appendChild(option);
+    return;
+  }
+
+  const allClasses = await response.json();
+
   // Show all past and upcoming classes since admin can set custom dates
-  const eligibleClasses = adminClassesCache
+  const eligibleClasses = allClasses
     .filter((item) => !isFridayDisabledClass(item.startsAt))
     .sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt));
 
