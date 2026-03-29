@@ -72,7 +72,6 @@ const assignPassButton = document.getElementById("assign-pass");
 const passTotalInput = document.getElementById("pass-total");
 const passRemainingInput = document.getElementById("pass-remaining");
 const savePassAdminButton = document.getElementById("save-pass-admin");
-const passClassSelect = document.getElementById("pass-class-select");
 const passUseDate = document.getElementById("pass-use-date");
 const addPassUseButton = document.getElementById("add-pass-use");
 const passUsesAdmin = document.getElementById("pass-uses-admin");
@@ -1032,7 +1031,6 @@ const loadAdminData = async () => {
   const users = await usersResponse.json();
   adminClassesCache = classes;
   adminUsersCache = Array.isArray(users) ? users : [];
-  await updatePassClassOptions();
   renderAdminClasses(filterClassesToDisplayWeek(classes));
   setAdminClassVisibility(adminClassesOpen);
   renderNotifications(notifications);
@@ -1045,43 +1043,8 @@ const loadAdminData = async () => {
   }
 };
 
-const updatePassClassOptions = async () => {
-  if (!passClassSelect) {
-    return;
-  }
-  passClassSelect.innerHTML = "";
-
-  // Fetch all classes directly without any time restrictions
-  const response = await fetch("/api/admin/all-classes");
-  if (!response.ok) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "Nem sikerült betölteni az órákat";
-    passClassSelect.appendChild(option);
-    return;
-  }
-
-  const allClasses = await response.json();
-
-  // Show all past and upcoming classes since admin can set custom dates
-  const eligibleClasses = allClasses
-    .filter((item) => !isFridayDisabledClass(item.startsAt))
-    .sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt));
-
-  if (eligibleClasses.length === 0) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "Nincs elérhető óra";
-    passClassSelect.appendChild(option);
-    return;
-  }
-
-  eligibleClasses.forEach((item) => {
-    const option = document.createElement("option");
-    option.value = String(item.id);
-    option.textContent = `${item.title} - ${formatDate(item.startsAt)}`;
-    passClassSelect.appendChild(option);
-  });
+const updatePassClassOptions = () => {
+  // No longer needed - using direct number input
 };
 
 const renderAdminPass = (data) => {
@@ -1319,13 +1282,12 @@ const saveAdminPass = async () => {
 };
 
 const addPassUse = async () => {
-  if (!passAdminEmail || !passClassSelect) {
+  if (!passAdminEmail) {
     return;
   }
   const email = passAdminEmail.value.trim();
-  const classId = passClassSelect.value;
-  if (!email || !classId) {
-    passAdminStatus.textContent = "Email és óra kiválasztása kötelező.";
+  if (!email) {
+    passAdminStatus.textContent = "Email kötelező.";
     return;
   }
 
@@ -1335,7 +1297,7 @@ const addPassUse = async () => {
     usedAt = dateObj.toISOString();
   }
 
-  const body = { email, classId };
+  const body = { email };
   if (usedAt) {
     body.used_at = usedAt;
   }

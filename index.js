@@ -1767,9 +1767,9 @@ app.post("/api/admin/passes/set", requireAdmin, (req, res) => {
 });
 
 app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
-  const { email, classId, used_at } = req.body;
-  if (!email || !classId) {
-    return res.status(400).json({ error: "Email and classId required" });
+  const { email, used_at } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: "Email required" });
   }
   db.get(
     "SELECT * FROM passes WHERE user_email = ? AND remaining > 0 ORDER BY created_at DESC LIMIT 1",
@@ -1781,57 +1781,26 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
       if (!passRow) {
         return res.status(400).json({ error: "No active pass" });
       }
-      db.get(
-        "SELECT id, starts_at FROM classes WHERE id = ?",
-        [classId],
-        (classErr, classRow) => {
-          if (classErr) {
+
+      const usedAt = used_at || new Date().toISOString();
+      db.run(
+        "UPDATE passes SET remaining = remaining - 1 WHERE id = ? AND remaining > 0",
+        [passRow.id],
+        function onUpdate(updateErr) {
+          if (updateErr) {
             return res.status(500).json({ error: "Database error" });
           }
-          if (!classRow) {
-            return res.status(404).json({ error: "Class not found" });
+          if (this.changes === 0) {
+            return res.status(400).json({ error: "No remaining" });
           }
-
-          // Only validate date constraints if no custom used_at date is provided
-          if (!used_at) {
-            const classStart = new Date(classRow.starts_at);
-            const now = new Date();
-            const earliest = new Date(now);
-            earliest.setHours(0, 0, 0, 0);
-            earliest.setDate(earliest.getDate() - PASS_USE_BACKDATE_DAYS);
-            if (classStart > now) {
-              return res
-                .status(400)
-                .json({ error: "Csak lezajlott orara adhato alkalom." });
-            }
-            if (classStart < earliest) {
-              return res.status(400).json({
-                error: "Csak az elmult 7 nap oraihoz adhato alkalom.",
-              });
-            }
-          }
-
-          const usedAt = used_at || new Date().toISOString();
           db.run(
-            "UPDATE passes SET remaining = remaining - 1 WHERE id = ? AND remaining > 0",
-            [passRow.id],
-            function onUpdate(updateErr) {
-              if (updateErr) {
+            "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
+            [passRow.id, null, usedAt],
+            function onInsert(insertErr) {
+              if (insertErr) {
                 return res.status(500).json({ error: "Database error" });
               }
-              if (this.changes === 0) {
-                return res.status(400).json({ error: "No remaining" });
-              }
-              db.run(
-                "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
-                [passRow.id, classId, usedAt],
-                function onInsert(insertErr) {
-                  if (insertErr) {
-                    return res.status(500).json({ error: "Database error" });
-                  }
-                  return res.json({ id: this.lastID });
-                },
-              );
+              return res.json({ id: this.lastID });
             },
           );
         },
