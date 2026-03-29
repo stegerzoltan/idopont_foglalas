@@ -1801,45 +1801,25 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
             }
           }
 
-          db.get(
-            `SELECT pu.id
-             FROM pass_uses pu
-             JOIN passes p ON pu.pass_id = p.id
-             WHERE p.user_email = ? AND pu.class_id = ?
-             LIMIT 1`,
-            [email, classId],
-            (useErr, useRow) => {
-              if (useErr) {
+          const usedAt = used_at || new Date().toISOString();
+          db.run(
+            "UPDATE passes SET remaining = remaining - 1 WHERE id = ? AND remaining > 0",
+            [passRow.id],
+            function onUpdate(updateErr) {
+              if (updateErr) {
                 return res.status(500).json({ error: "Database error" });
               }
-              if (useRow) {
-                return res
-                  .status(400)
-                  .json({ error: "Ez az alkalom mar levonva." });
+              if (this.changes === 0) {
+                return res.status(400).json({ error: "No remaining" });
               }
-              const usedAt = used_at || new Date().toISOString();
               db.run(
-                "UPDATE passes SET remaining = remaining - 1 WHERE id = ? AND remaining > 0",
-                [passRow.id],
-                function onUpdate(updateErr) {
-                  if (updateErr) {
+                "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
+                [passRow.id, classId, usedAt],
+                function onInsert(insertErr) {
+                  if (insertErr) {
                     return res.status(500).json({ error: "Database error" });
                   }
-                  if (this.changes === 0) {
-                    return res.status(400).json({ error: "No remaining" });
-                  }
-                  db.run(
-                    "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
-                    [passRow.id, classId, usedAt],
-                    function onInsert(insertErr) {
-                      if (insertErr) {
-                        return res
-                          .status(500)
-                          .json({ error: "Database error" });
-                      }
-                      return res.json({ id: this.lastID });
-                    },
-                  );
+                  return res.json({ id: this.lastID });
                 },
               );
             },
