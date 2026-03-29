@@ -1794,8 +1794,8 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
             return res.status(400).json({ error: "No remaining" });
           }
           db.run(
-            "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
-            [passRow.id, null, usedAt],
+            "INSERT INTO pass_uses (pass_id, used_at) VALUES (?, ?)",
+            [passRow.id, usedAt],
             function onInsert(insertErr) {
               if (insertErr) {
                 return res.status(500).json({ error: "Database error" });
@@ -2705,36 +2705,8 @@ app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-const runMigrations = () => {
-  // SQLite migration: make class_id nullable in pass_uses
-  if (!IS_POSTGRES) {
-    db.serialize(() => {
-      db.run("PRAGMA foreign_keys = OFF", () => {});
-      db.run(
-        `CREATE TABLE IF NOT EXISTS pass_uses_new (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          pass_id INTEGER NOT NULL,
-          class_id INTEGER,
-          used_at TEXT NOT NULL,
-          FOREIGN KEY(pass_id) REFERENCES passes(id)
-        )`,
-        () => {},
-      );
-      db.run(
-        "INSERT OR IGNORE INTO pass_uses_new SELECT id, pass_id, class_id, used_at FROM pass_uses",
-        () => {},
-      );
-      db.run("ALTER TABLE pass_uses RENAME TO pass_uses_old", () => {});
-      db.run("ALTER TABLE pass_uses_new RENAME TO pass_uses", () => {});
-      db.run("DROP TABLE IF EXISTS pass_uses_old", () => {});
-      db.run("PRAGMA foreign_keys = ON", () => {});
-    });
-  }
-};
-
 initDb()
   .then(() => {
-    runMigrations();
     removeEmptyDisabledFridayClasses();
     seedWeeklyClasses();
     processDuePassUses();
