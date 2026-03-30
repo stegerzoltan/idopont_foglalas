@@ -1443,7 +1443,7 @@ app.get("/api/passes/me", requireUser, (req, res) => {
             uses: useRows.map((row) => ({
               id: row.id,
               usedAt: row.used_at,
-              title: row.title || "Alkalom (osztály nélkül)",
+              title: row.title || "Alkalom",
               startsAt: row.starts_at || row.used_at,
             })),
           });
@@ -1789,7 +1789,7 @@ app.get("/api/admin/passes/:email", requireAdmin, (req, res) => {
             uses: useRows.map((row) => ({
               id: row.id,
               usedAt: row.used_at,
-              title: row.title || "Alkalom (osztály nélkül)",
+              title: row.title || "Alkalom",
               startsAt: row.starts_at || row.used_at,
             })),
           });
