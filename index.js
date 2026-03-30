@@ -1767,36 +1767,67 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
   if (!email) {
     return res.status(400).json({ error: "Email required" });
   }
+
+  // Get the pass first
   db.get(
-    "SELECT * FROM passes WHERE user_email = ? AND remaining > 0 ORDER BY created_at DESC LIMIT 1",
+    "SELECT id, total FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
     [email],
     (err, passRow) => {
       if (err) {
-        return res.status(500).json({ error: "Database error" });
+        return res
+          .status(500)
+          .json({ error: "Database error: " + err.message });
       }
       if (!passRow) {
         return res.status(400).json({ error: "No active pass" });
       }
 
-      const usedAt = used_at || new Date().toISOString();
-      db.run(
-        "UPDATE passes SET remaining = remaining - 1 WHERE id = ? AND remaining > 0",
+      // Check current usage count
+      db.get(
+        "SELECT COUNT(*) as count FROM pass_uses WHERE pass_id = ?",
         [passRow.id],
-        function onUpdate(updateErr) {
-          if (updateErr) {
-            return res.status(500).json({ error: "Database error" });
+        (countErr, countRow) => {
+          if (countErr) {
+            return res
+              .status(500)
+              .json({ error: "Database error: " + countErr.message });
           }
-          if (this.changes === 0) {
-            return res.status(400).json({ error: "No remaining" });
+
+          const currentUsed = countRow ? countRow.count : 0;
+          if (currentUsed >= passRow.total) {
+            return res.status(400).json({ error: "No remaining uses" });
           }
+
+          const usedAt = used_at || new Date().toISOString();
+
+          // Insert the pass use
           db.run(
             "INSERT INTO pass_uses (pass_id, used_at) VALUES (?, ?)",
             [passRow.id, usedAt],
             function onInsert(insertErr) {
               if (insertErr) {
-                return res.status(500).json({ error: "Database error" });
+                return res
+                  .status(500)
+                  .json({ error: "Database error: " + insertErr.message });
               }
-              return res.json({ id: this.lastID });
+
+              const insertedId = this.lastID;
+
+              // Update remaining to keep it in sync with actual uses
+              const remaining = passRow.total - (currentUsed + 1);
+              db.run(
+                "UPDATE passes SET remaining = ? WHERE id = ?",
+                [remaining, passRow.id],
+                (syncErr) => {
+                  if (syncErr) {
+                    console.warn(
+                      "Warning: Failed to sync remaining:",
+                      syncErr.message,
+                    );
+                  }
+                  return res.json({ id: insertedId });
+                },
+              );
             },
           );
         },
