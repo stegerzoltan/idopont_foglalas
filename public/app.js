@@ -1415,9 +1415,6 @@ const updateUserUI = () => {
   signupName.disabled = true;
   signupEmail.disabled = true;
   signupLoginButton.hidden = !!currentUser;
-  if (!currentUser) {
-    renderCalendarSync(null);
-  }
 };
 
 const setAuthMode = (mode) => {
@@ -1539,7 +1536,6 @@ userLoginForm.addEventListener("submit", async (event) => {
   const data = await response.json();
   currentUser = data.user;
   updateUserUI();
-  await loadCalendarSyncStatus();
   userLoginMessage.textContent =
     authMode === "register" ? "Sikeres regisztráció." : "Sikeres belépés.";
   closeModal(userModal);
@@ -1661,7 +1657,6 @@ openUser.addEventListener("click", async () => {
 
 openSignups?.addEventListener("click", () => {
   renderSignupsMenu();
-  renderCalendarSync();
   openModal(signupsModal);
 });
 
