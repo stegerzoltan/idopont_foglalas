@@ -648,37 +648,54 @@ const refreshGoogleAccessTokenIfNeeded = async (connection) => {
     return connection;
   }
   if (!connection.refresh_token) {
+    console.warn(
+      "Google Calendar: No refresh token available for user",
+      connection.user_email,
+    );
     return connection;
   }
 
-  const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: GOOGLE_CLIENT_ID,
-      client_secret: GOOGLE_CLIENT_SECRET,
-      refresh_token: connection.refresh_token,
-      grant_type: "refresh_token",
-    }),
-  });
-  if (!tokenResponse.ok) {
+  try {
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        refresh_token: connection.refresh_token,
+        grant_type: "refresh_token",
+      }),
+    });
+    if (!tokenResponse.ok) {
+      const errText = await tokenResponse.text().catch(() => "");
+      console.warn(
+        `Google Calendar token refresh failed (${tokenResponse.status}):`,
+        errText || tokenResponse.statusText,
+      );
+      return connection;
+    }
+    const tokenData = await tokenResponse.json();
+    const tokenExpiry = tokenData.expires_in
+      ? new Date(Date.now() + Number(tokenData.expires_in) * 1000).toISOString()
+      : connection.token_expiry;
+    await saveGoogleConnection({
+      userEmail: connection.user_email,
+      accessToken: tokenData.access_token,
+      refreshToken: connection.refresh_token,
+      tokenExpiry,
+    });
+    return {
+      ...connection,
+      access_token: tokenData.access_token,
+      token_expiry: tokenExpiry,
+    };
+  } catch (error) {
+    console.error(
+      "Google Calendar token refresh error:",
+      error.message || error,
+    );
     return connection;
   }
-  const tokenData = await tokenResponse.json();
-  const tokenExpiry = tokenData.expires_in
-    ? new Date(Date.now() + Number(tokenData.expires_in) * 1000).toISOString()
-    : connection.token_expiry;
-  await saveGoogleConnection({
-    userEmail: connection.user_email,
-    accessToken: tokenData.access_token,
-    refreshToken: connection.refresh_token,
-    tokenExpiry,
-  });
-  return {
-    ...connection,
-    access_token: tokenData.access_token,
-    token_expiry: tokenExpiry,
-  };
 };
 
 const createGoogleCalendarEventForSignup = async ({
@@ -695,6 +712,13 @@ const createGoogleCalendarEventForSignup = async ({
     return;
   }
   const activeConnection = await refreshGoogleAccessTokenIfNeeded(connection);
+  if (!activeConnection) {
+    console.warn(
+      "Google Calendar: No active connection after refresh for",
+      email,
+    );
+    return;
+  }
   const startDate = new Date(classRow.starts_at);
   const endDate = new Date(
     startDate.getTime() + CLASS_DURATION_MINUTES * 60000,
@@ -703,12 +727,12 @@ const createGoogleCalendarEventForSignup = async ({
   const eventPayload = {
     summary: classRow.title || "Edzés MuscleFit",
     description: [
-      classRow.coach ? `Edzo: ${classRow.coach}` : null,
-      fullName ? `Resztvevo: ${fullName}` : null,
-      classRow.notes ? `Megjegyzes: ${classRow.notes}` : null,
+      classRow.coach ? `Edző: ${classRow.coach}` : null,
+      fullName ? `Résztvevő: ${fullName}` : null,
+      classRow.notes ? `Megjegyzés: ${classRow.notes}` : null,
     ]
       .filter(Boolean)
-      .join("\\n"),
+      .join("\n"),
     start: {
       dateTime: startDate.toISOString(),
       timeZone: "Europe/Budapest",
@@ -726,28 +750,41 @@ const createGoogleCalendarEventForSignup = async ({
   const calendarId = encodeURIComponent(
     activeConnection.calendar_id || GOOGLE_DEFAULT_CALENDAR_ID,
   );
-  const createResponse = await fetch(
-    `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${activeConnection.access_token}`,
-        "Content-Type": "application/json",
+  try {
+    const createResponse = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${activeConnection.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(eventPayload),
       },
-      body: JSON.stringify(eventPayload),
-    },
-  );
-  if (!createResponse.ok) {
-    return;
+    );
+    if (!createResponse.ok) {
+      const errText = await createResponse.text().catch(() => "");
+      console.warn(
+        `Google Calendar event creation failed (${createResponse.status}):`,
+        errText || createResponse.statusText,
+      );
+      return;
+    }
+    const eventData = await createResponse.json();
+    if (!eventData.id) {
+      console.warn("Google Calendar: No event ID returned", eventData);
+      return;
+    }
+    await dbRunAsync(
+      "UPDATE signups SET calendar_provider = 'google', calendar_event_id = ? WHERE id = ?",
+      [eventData.id, signupId],
+    );
+  } catch (error) {
+    console.error(
+      "Google Calendar event creation error:",
+      error.message || error,
+    );
   }
-  const eventData = await createResponse.json();
-  if (!eventData.id) {
-    return;
-  }
-  await dbRunAsync(
-    "UPDATE signups SET calendar_provider = 'google', calendar_event_id = ? WHERE id = ?",
-    [eventData.id, signupId],
-  );
 };
 
 const deleteGoogleCalendarEventForSignup = async ({
@@ -767,22 +804,46 @@ const deleteGoogleCalendarEventForSignup = async ({
     return;
   }
   const activeConnection = await refreshGoogleAccessTokenIfNeeded(connection);
-  const calendarId = encodeURIComponent(
-    activeConnection.calendar_id || GOOGLE_DEFAULT_CALENDAR_ID,
-  );
-  const deleteResponse = await fetch(
-    `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${encodeURIComponent(eventId)}`,
-    {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${activeConnection.access_token}`,
-      },
-    },
-  );
-  if (deleteResponse.ok || deleteResponse.status === 404) {
+  if (!activeConnection) {
+    console.warn(
+      "Google Calendar: No active connection after refresh for delete",
+      email,
+    );
     await dbRunAsync(
       "UPDATE signups SET calendar_provider = NULL, calendar_event_id = NULL WHERE id = ?",
       [signupId],
+    );
+    return;
+  }
+  const calendarId = encodeURIComponent(
+    activeConnection.calendar_id || GOOGLE_DEFAULT_CALENDAR_ID,
+  );
+  try {
+    const deleteResponse = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${encodeURIComponent(eventId)}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${activeConnection.access_token}`,
+        },
+      },
+    );
+    if (deleteResponse.ok || deleteResponse.status === 404) {
+      await dbRunAsync(
+        "UPDATE signups SET calendar_provider = NULL, calendar_event_id = NULL WHERE id = ?",
+        [signupId],
+      );
+    } else {
+      const errText = await deleteResponse.text().catch(() => "");
+      console.warn(
+        `Google Calendar event deletion failed (${deleteResponse.status}):`,
+        errText || deleteResponse.statusText,
+      );
+    }
+  } catch (error) {
+    console.error(
+      "Google Calendar event deletion error:",
+      error.message || error,
     );
   }
 };
@@ -1282,6 +1343,7 @@ app.get("/api/calendar/google/status", requireUser, async (req, res) => {
 
 app.get("/api/calendar/google/connect", requireUser, (req, res) => {
   if (!isGoogleCalendarConfigured()) {
+    console.warn("Google Calendar: Not configured (missing env vars)");
     return res
       .status(503)
       .json({ error: "Google Calendar nincs konfigurálva." });

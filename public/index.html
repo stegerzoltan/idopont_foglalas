@@ -65,17 +65,6 @@
         <h4>Saját feliratkozások</h4>
         <div class="stack" id="my-signups-list"></div>
       </div>
-      <div class="calendar-sync" id="calendar-sync" hidden>
-        <p class="helper" id="calendar-sync-status"></p>
-        <div class="form-actions">
-          <button type="button" class="ghost" id="connect-google-calendar">
-            Google Naptár összekapcsolása
-          </button>
-          <button type="button" class="ghost" id="disconnect-google-calendar" hidden>
-            Google kapcsolat bontása
-          </button>
-        </div>
-      </div>
     </div>
   </div>
 
@@ -130,7 +119,6 @@
         <button type="submit" class="primary" id="auth-submit">Belépek</button>
         <p class="helper" id="user-login-message"></p>
       </form>
-      <!-- Naptár szinkronizációs panel eltávolítva a bejelentkezés fülről -->
     </div>
   </div>
 
@@ -220,6 +208,17 @@
       <button class="icon-button" id="close-signups" aria-label="Bezárás">x</button>
       <h3>Feliratkozások</h3>
       <div class="stack" id="signups-list"></div>
+      <div class="calendar-sync" id="calendar-sync" hidden>
+        <p class="helper" id="calendar-sync-status"></p>
+        <div class="form-actions">
+          <button type="button" class="ghost" id="connect-google-calendar">
+            Google Naptár összekapcsolása
+          </button>
+          <button type="button" class="ghost" id="disconnect-google-calendar" hidden>
+            Google kapcsolat bontása
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 

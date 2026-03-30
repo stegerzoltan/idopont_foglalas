@@ -990,11 +990,6 @@ const openSignup = (item) => {
     }
   }
   openModal(signupModal);
-  // Ha be van jelentkezve, jelenítsük meg a naptár szinkronizációs panelt is a signup modalban
-  if (currentUser && calendarSync) {
-    calendarSync.hidden = false;
-    renderCalendarSync();
-  }
   loadMySignups();
 };
 
@@ -1760,7 +1755,6 @@ openUser.addEventListener("click", async () => {
   if (currentUser) {
     // Ha be van jelentkezve, csak nyissuk meg a user modalt, NE léptessük ki!
     openModal(userModal);
-    renderCalendarSync();
     return;
   }
   setAuthMode("login");
@@ -1772,6 +1766,7 @@ openUser.addEventListener("click", async () => {
 
 openSignups?.addEventListener("click", () => {
   renderSignupsMenu();
+  renderCalendarSync();
   openModal(signupsModal);
 });
 
