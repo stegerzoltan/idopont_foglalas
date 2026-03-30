@@ -1319,24 +1319,33 @@ const addPassUse = async () => {
     body.used_at = usedAt;
   }
 
-  const response = await apiFetch("/api/admin/passes/use", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (handleAdminUnauthorized(response)) {
-    return;
+  try {
+    const response = await apiFetch("/api/admin/passes/use", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const responseData = await response.json();
+    console.log("Add pass use response:", response.status, responseData);
+
+    if (handleAdminUnauthorized(response)) {
+      return;
+    }
+    if (!response.ok) {
+      passAdminStatus.textContent =
+        responseData.error || "Nem sikerült menteni.";
+      return;
+    }
+    passAdminStatus.textContent = "Alkalom hozzáadva.";
+    if (passUseDate) {
+      passUseDate.value = "";
+    }
+    await loadAdminPass();
+  } catch (err) {
+    console.error("Error adding pass use:", err);
+    passAdminStatus.textContent = "Hiba történt: " + err.message;
   }
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    passAdminStatus.textContent = err.error || "Nem sikerült menteni.";
-    return;
-  }
-  passAdminStatus.textContent = "Alkalom hozzáadva.";
-  if (passUseDate) {
-    passUseDate.value = "";
-  }
-  await loadAdminPass();
 };
 
 const deletePassUse = async (useId) => {

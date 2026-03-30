@@ -1346,8 +1346,8 @@ app.get("/api/passes/me", requireUser, (req, res) => {
             uses: useRows.map((row) => ({
               id: row.id,
               usedAt: row.used_at,
-              title: row.title,
-              startsAt: row.starts_at,
+              title: row.title || "Alkalom (osztály nélkül)",
+              startsAt: row.starts_at || row.used_at,
             })),
           });
         },
@@ -1692,8 +1692,8 @@ app.get("/api/admin/passes/:email", requireAdmin, (req, res) => {
             uses: useRows.map((row) => ({
               id: row.id,
               usedAt: row.used_at,
-              title: row.title,
-              startsAt: row.starts_at,
+              title: row.title || "Alkalom (osztály nélkül)",
+              startsAt: row.starts_at || row.used_at,
             })),
           });
         },
@@ -1814,18 +1814,19 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
               const insertedId = this.lastID;
 
               // Update remaining to keep it in sync with actual uses
-              const remaining = passRow.total - (currentUsed + 1);
+              const remaining = Math.max(0, passRow.total - (currentUsed + 1));
               db.run(
                 "UPDATE passes SET remaining = ? WHERE id = ?",
                 [remaining, passRow.id],
                 (syncErr) => {
+                  // Return success regardless of sync error (INSERT already succeeded)
                   if (syncErr) {
                     console.warn(
                       "Warning: Failed to sync remaining:",
                       syncErr.message,
                     );
                   }
-                  return res.json({ id: insertedId });
+                  return res.json({ id: insertedId, success: true });
                 },
               );
             },
