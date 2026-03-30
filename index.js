@@ -1093,10 +1093,7 @@ app.get("/api/signups/:id/calendar.ics", requireUser, (req, res) => {
       );
       const host = req.get("host") || "idopont-foglalas.local";
       const uid = `signup-${row.id}@${host}`;
-      const description = [
-        "Edző: Stégermájer",
-        `Feliratkozó: ${email}`,
-      ]
+      const description = ["Edző: Stégermájer", `Feliratkozó: ${email}`]
         .filter(Boolean)
         .join("\\n");
       const ics = buildSignupIcs({
