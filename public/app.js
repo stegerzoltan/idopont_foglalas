@@ -14,14 +14,7 @@ const openUser = document.getElementById("open-user");
 const userModal = document.getElementById("user-modal");
 const userLoginForm = document.getElementById("user-login-form");
 const userLoginMessage = document.getElementById("user-login-message");
-const calendarSync = document.getElementById("calendar-sync");
-const calendarSyncStatus = document.getElementById("calendar-sync-status");
-const connectGoogleCalendarButton = document.getElementById(
-  "connect-google-calendar",
-);
-const disconnectGoogleCalendarButton = document.getElementById(
-  "disconnect-google-calendar",
-);
+
 const authLoginButton = document.getElementById("auth-login");
 const authRegisterButton = document.getElementById("auth-register");
 const authSubmitButton = document.getElementById("auth-submit");
@@ -88,7 +81,6 @@ let adminClassesCache = [];
 let adminUsersCache = [];
 let adminClassesOpen = false;
 let adminNotificationsOpen = false;
-let calendarSyncLoading = false;
 
 const WEEK_DAYS = [
   { key: 1, label: "Hétfő" },
@@ -1380,7 +1372,6 @@ const loadUser = async () => {
     if (!response.ok) {
       currentUser = null;
       updateUserUI();
-      renderCalendarSync(null);
       renderMySignups([]);
       renderSignupsMenu();
       return;
@@ -1388,92 +1379,13 @@ const loadUser = async () => {
     const data = await response.json();
     currentUser = data.user;
     updateUserUI();
-    await loadCalendarSyncStatus();
     await loadMySignups();
   } catch (err) {
     currentUser = null;
     updateUserUI();
-    renderCalendarSync(null);
     renderMySignups([]);
     renderSignupsMenu();
   }
-};
-
-const renderCalendarSync = (status) => {
-  if (!calendarSync || !calendarSyncStatus) {
-    return;
-  }
-  if (!currentUser) {
-    calendarSync.hidden = true;
-    return;
-  }
-  calendarSync.hidden = false;
-  if (!status) {
-    calendarSyncStatus.textContent = "Naptárkapcsolat állapot betöltése...";
-    if (connectGoogleCalendarButton) {
-      connectGoogleCalendarButton.disabled = true;
-      connectGoogleCalendarButton.hidden = false;
-    }
-    if (disconnectGoogleCalendarButton) {
-      disconnectGoogleCalendarButton.hidden = true;
-      disconnectGoogleCalendarButton.disabled = true;
-    }
-    return;
-  }
-
-  if (!status.configured) {
-    calendarSyncStatus.textContent =
-      "Google Naptár nincs konfigurálva a szerveren.";
-    if (connectGoogleCalendarButton) {
-      connectGoogleCalendarButton.disabled = true;
-      connectGoogleCalendarButton.hidden = false;
-    }
-    if (disconnectGoogleCalendarButton) {
-      disconnectGoogleCalendarButton.hidden = true;
-      disconnectGoogleCalendarButton.disabled = true;
-    }
-    return;
-  }
-
-  if (status.connected) {
-    calendarSyncStatus.textContent =
-      "Google Naptár kapcsolva. Feliratkozáskor automatikusan hozzáad, lemondáskor töröl.";
-    if (connectGoogleCalendarButton) {
-      connectGoogleCalendarButton.hidden = true;
-      connectGoogleCalendarButton.disabled = false;
-    }
-    if (disconnectGoogleCalendarButton) {
-      disconnectGoogleCalendarButton.hidden = false;
-      disconnectGoogleCalendarButton.disabled = false;
-    }
-    return;
-  }
-
-  calendarSyncStatus.textContent =
-    "Google Naptár nincs összekapcsolva. Kattints az összekapcsolásra, vagy használd az iPhone/Apple naptár gombot a feliratkozásoknál.";
-  if (connectGoogleCalendarButton) {
-    connectGoogleCalendarButton.hidden = false;
-    connectGoogleCalendarButton.disabled = false;
-  }
-  if (disconnectGoogleCalendarButton) {
-    disconnectGoogleCalendarButton.hidden = true;
-    disconnectGoogleCalendarButton.disabled = true;
-  }
-};
-
-const loadCalendarSyncStatus = async () => {
-  if (!currentUser) {
-    renderCalendarSync(null);
-    return;
-  }
-  renderCalendarSync(null);
-  const response = await apiFetch("/api/calendar/google/status");
-  if (!response.ok) {
-    renderCalendarSync({ configured: false, connected: false });
-    return;
-  }
-  const status = await response.json();
-  renderCalendarSync(status);
 };
 
 const updateUserUI = () => {
@@ -1506,23 +1418,6 @@ const updateUserUI = () => {
   if (!currentUser) {
     renderCalendarSync(null);
   }
-};
-
-const handleCalendarCallbackStatus = () => {
-  const params = new URLSearchParams(window.location.search);
-  const calendarStatus = params.get("calendar");
-  if (!calendarStatus) {
-    return;
-  }
-  if (calendarStatus === "connected") {
-    userLoginMessage.textContent = "Google Naptár sikeresen összekapcsolva.";
-  } else if (calendarStatus === "not-configured") {
-    userLoginMessage.textContent = "Google Naptár nincs konfigurálva.";
-  } else {
-    userLoginMessage.textContent = "Google Naptár kapcsolás sikertelen.";
-  }
-  const cleanUrl = window.location.pathname;
-  window.history.replaceState({}, document.title, cleanUrl);
 };
 
 const setAuthMode = (mode) => {
@@ -1881,7 +1776,6 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("DOMContentLoaded", () => {
-  handleCalendarCallbackStatus();
   loadClasses();
   loadUser();
   setAuthMode("login");
@@ -1894,59 +1788,6 @@ window.addEventListener("DOMContentLoaded", () => {
   if (shouldOpenAdminFromUrl()) {
     openAdminLogin();
   }
-});
-
-connectGoogleCalendarButton?.addEventListener("click", async () => {
-  if (calendarSyncLoading) {
-    return;
-  }
-  calendarSyncLoading = true;
-  if (calendarSyncStatus) {
-    calendarSyncStatus.textContent = "Google kapcsolat indítása...";
-  }
-  const response = await apiFetch("/api/calendar/google/connect");
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    if (calendarSyncStatus) {
-      calendarSyncStatus.textContent =
-        err.error || "Nem sikerült elindítani a kapcsolódást.";
-    }
-    calendarSyncLoading = false;
-    return;
-  }
-  const data = await response.json();
-  if (!data.url) {
-    if (calendarSyncStatus) {
-      calendarSyncStatus.textContent = "Hiányzó kapcsolódási URL.";
-    }
-    calendarSyncLoading = false;
-    return;
-  }
-  window.location.href = data.url;
-});
-
-disconnectGoogleCalendarButton?.addEventListener("click", async () => {
-  if (calendarSyncLoading) {
-    return;
-  }
-  calendarSyncLoading = true;
-  if (calendarSyncStatus) {
-    calendarSyncStatus.textContent = "Google kapcsolat bontása...";
-  }
-  const response = await apiFetch("/api/calendar/google/disconnect", {
-    method: "POST",
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    if (calendarSyncStatus) {
-      calendarSyncStatus.textContent =
-        err.error || "Nem sikerült bontani a kapcsolatot.";
-    }
-    calendarSyncLoading = false;
-    return;
-  }
-  await loadCalendarSyncStatus();
-  calendarSyncLoading = false;
 });
 
 userPhone?.addEventListener("input", () => {

@@ -17,11 +17,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || `mailto:${ADMIN_EMAIL}`;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
-const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
-const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
-const GOOGLE_DEFAULT_CALENDAR_ID = "primary";
+const CLASS_LOCATION = "5700, Gyula, Csabai út 3";
 const IS_POSTGRES = Boolean(process.env.DATABASE_URL);
 let vapidKeys = {
   publicKey: process.env.VAPID_PUBLIC_KEY,
@@ -592,262 +588,6 @@ const dbGetAsync = (sql, params = []) =>
     });
   });
 
-const isGoogleCalendarConfigured = () =>
-  Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REDIRECT_URI);
-
-const buildGoogleAuthUrl = (state) => {
-  const params = new URLSearchParams({
-    client_id: GOOGLE_CLIENT_ID,
-    redirect_uri: GOOGLE_REDIRECT_URI,
-    response_type: "code",
-    scope: GOOGLE_CALENDAR_SCOPE,
-    access_type: "offline",
-    prompt: "consent",
-    include_granted_scopes: "true",
-    state,
-  });
-  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
-};
-
-const saveGoogleConnection = async ({
-  userEmail,
-  accessToken,
-  refreshToken,
-  tokenExpiry,
-}) => {
-  const now = new Date().toISOString();
-  const sql =
-    "INSERT INTO user_calendar_connections (user_email, provider, access_token, refresh_token, token_expiry, calendar_id, created_at, updated_at) VALUES (?, 'google', ?, ?, ?, ?, ?, ?) ON CONFLICT (user_email) DO UPDATE SET provider = 'google', access_token = excluded.access_token, refresh_token = COALESCE(excluded.refresh_token, user_calendar_connections.refresh_token), token_expiry = excluded.token_expiry, calendar_id = excluded.calendar_id, updated_at = excluded.updated_at";
-  await dbRunAsync(sql, [
-    userEmail,
-    accessToken,
-    refreshToken || null,
-    tokenExpiry || null,
-    GOOGLE_DEFAULT_CALENDAR_ID,
-    now,
-    now,
-  ]);
-};
-
-const getGoogleConnectionByEmail = async (email) => {
-  return dbGetAsync(
-    "SELECT * FROM user_calendar_connections WHERE user_email = ? AND provider = 'google'",
-    [email],
-  );
-};
-
-const refreshGoogleAccessTokenIfNeeded = async (connection) => {
-  if (!connection) {
-    return null;
-  }
-  const expiryMs = connection.token_expiry
-    ? new Date(connection.token_expiry).getTime()
-    : 0;
-  const nowMs = Date.now();
-  if (expiryMs && expiryMs - nowMs > 60 * 1000) {
-    return connection;
-  }
-  if (!connection.refresh_token) {
-    console.warn(
-      "Google Calendar: No refresh token available for user",
-      connection.user_email,
-    );
-    return connection;
-  }
-
-  try {
-    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: GOOGLE_CLIENT_ID,
-        client_secret: GOOGLE_CLIENT_SECRET,
-        refresh_token: connection.refresh_token,
-        grant_type: "refresh_token",
-      }),
-    });
-    if (!tokenResponse.ok) {
-      const errText = await tokenResponse.text().catch(() => "");
-      console.warn(
-        `Google Calendar token refresh failed (${tokenResponse.status}):`,
-        errText || tokenResponse.statusText,
-      );
-      return connection;
-    }
-    const tokenData = await tokenResponse.json();
-    const tokenExpiry = tokenData.expires_in
-      ? new Date(Date.now() + Number(tokenData.expires_in) * 1000).toISOString()
-      : connection.token_expiry;
-    await saveGoogleConnection({
-      userEmail: connection.user_email,
-      accessToken: tokenData.access_token,
-      refreshToken: connection.refresh_token,
-      tokenExpiry,
-    });
-    return {
-      ...connection,
-      access_token: tokenData.access_token,
-      token_expiry: tokenExpiry,
-    };
-  } catch (error) {
-    console.error(
-      "Google Calendar token refresh error:",
-      error.message || error,
-    );
-    return connection;
-  }
-};
-
-const createGoogleCalendarEventForSignup = async ({
-  signupId,
-  email,
-  classRow,
-  fullName,
-}) => {
-  if (!isGoogleCalendarConfigured()) {
-    return;
-  }
-  const connection = await getGoogleConnectionByEmail(email);
-  if (!connection) {
-    return;
-  }
-  const activeConnection = await refreshGoogleAccessTokenIfNeeded(connection);
-  if (!activeConnection) {
-    console.warn(
-      "Google Calendar: No active connection after refresh for",
-      email,
-    );
-    return;
-  }
-  const startDate = new Date(classRow.starts_at);
-  const endDate = new Date(
-    startDate.getTime() + CLASS_DURATION_MINUTES * 60000,
-  );
-
-  const eventPayload = {
-    summary: classRow.title || "Edzés MuscleFit",
-    description: [
-      classRow.coach ? `Edző: ${classRow.coach}` : null,
-      fullName ? `Résztvevő: ${fullName}` : null,
-      classRow.notes ? `Megjegyzés: ${classRow.notes}` : null,
-    ]
-      .filter(Boolean)
-      .join("\n"),
-    start: {
-      dateTime: startDate.toISOString(),
-      timeZone: "Europe/Budapest",
-    },
-    end: {
-      dateTime: endDate.toISOString(),
-      timeZone: "Europe/Budapest",
-    },
-  };
-
-  if (classRow.location) {
-    eventPayload.location = classRow.location;
-  }
-
-  const calendarId = encodeURIComponent(
-    activeConnection.calendar_id || GOOGLE_DEFAULT_CALENDAR_ID,
-  );
-  try {
-    const createResponse = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${activeConnection.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(eventPayload),
-      },
-    );
-    if (!createResponse.ok) {
-      const errText = await createResponse.text().catch(() => "");
-      console.warn(
-        `Google Calendar event creation failed (${createResponse.status}):`,
-        errText || createResponse.statusText,
-      );
-      return;
-    }
-    const eventData = await createResponse.json();
-    if (!eventData.id) {
-      console.warn("Google Calendar: No event ID returned", eventData);
-      return;
-    }
-    await dbRunAsync(
-      "UPDATE signups SET calendar_provider = 'google', calendar_event_id = ? WHERE id = ?",
-      [eventData.id, signupId],
-    );
-  } catch (error) {
-    console.error(
-      "Google Calendar event creation error:",
-      error.message || error,
-    );
-  }
-};
-
-const deleteGoogleCalendarEventForSignup = async ({
-  signupId,
-  email,
-  eventId,
-}) => {
-  if (!isGoogleCalendarConfigured() || !eventId) {
-    return;
-  }
-  const connection = await getGoogleConnectionByEmail(email);
-  if (!connection) {
-    await dbRunAsync(
-      "UPDATE signups SET calendar_provider = NULL, calendar_event_id = NULL WHERE id = ?",
-      [signupId],
-    );
-    return;
-  }
-  const activeConnection = await refreshGoogleAccessTokenIfNeeded(connection);
-  if (!activeConnection) {
-    console.warn(
-      "Google Calendar: No active connection after refresh for delete",
-      email,
-    );
-    await dbRunAsync(
-      "UPDATE signups SET calendar_provider = NULL, calendar_event_id = NULL WHERE id = ?",
-      [signupId],
-    );
-    return;
-  }
-  const calendarId = encodeURIComponent(
-    activeConnection.calendar_id || GOOGLE_DEFAULT_CALENDAR_ID,
-  );
-  try {
-    const deleteResponse = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${encodeURIComponent(eventId)}`,
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${activeConnection.access_token}`,
-        },
-      },
-    );
-    if (deleteResponse.ok || deleteResponse.status === 404) {
-      await dbRunAsync(
-        "UPDATE signups SET calendar_provider = NULL, calendar_event_id = NULL WHERE id = ?",
-        [signupId],
-      );
-    } else {
-      const errText = await deleteResponse.text().catch(() => "");
-      console.warn(
-        `Google Calendar event deletion failed (${deleteResponse.status}):`,
-        errText || deleteResponse.statusText,
-      );
-    }
-  } catch (error) {
-    console.error(
-      "Google Calendar event deletion error:",
-      error.message || error,
-    );
-  }
-};
-
 const escapeIcsText = (value) =>
   String(value || "")
     .replace(/\\/g, "\\\\")
@@ -1325,100 +1065,6 @@ app.post("/api/admin/telegram/test", requireAdmin, async (req, res) => {
   return res.json({ ok: true });
 });
 
-app.get("/api/calendar/google/status", requireUser, async (req, res) => {
-  if (!isGoogleCalendarConfigured()) {
-    return res.json({ configured: false, connected: false });
-  }
-  try {
-    const connection = await getGoogleConnectionByEmail(req.session.user.email);
-    return res.json({
-      configured: true,
-      connected: Boolean(connection),
-      provider: connection ? "google" : null,
-    });
-  } catch (err) {
-    return res.status(500).json({ error: "Calendar status error" });
-  }
-});
-
-app.get("/api/calendar/google/connect", requireUser, (req, res) => {
-  if (!isGoogleCalendarConfigured()) {
-    console.warn("Google Calendar: Not configured (missing env vars)");
-    return res
-      .status(503)
-      .json({ error: "Google Calendar nincs konfigurálva." });
-  }
-  const state = crypto.randomBytes(16).toString("hex");
-  req.session.googleCalendarState = state;
-  req.session.googleCalendarStateEmail = req.session.user.email;
-  req.session.googleCalendarStateExpires = Date.now() + 10 * 60 * 1000;
-  return res.json({ url: buildGoogleAuthUrl(state) });
-});
-
-app.get("/api/calendar/google/callback", async (req, res) => {
-  const { code, state } = req.query;
-  const stateValid =
-    state &&
-    req.session &&
-    req.session.user &&
-    req.session.googleCalendarState === state &&
-    req.session.googleCalendarStateEmail === req.session.user.email &&
-    Number(req.session.googleCalendarStateExpires || 0) > Date.now();
-
-  req.session.googleCalendarState = null;
-  req.session.googleCalendarStateEmail = null;
-  req.session.googleCalendarStateExpires = null;
-
-  if (!stateValid || !code) {
-    return res.redirect("/?calendar=error");
-  }
-  if (!isGoogleCalendarConfigured()) {
-    return res.redirect("/?calendar=not-configured");
-  }
-
-  try {
-    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code: String(code),
-        client_id: GOOGLE_CLIENT_ID,
-        client_secret: GOOGLE_CLIENT_SECRET,
-        redirect_uri: GOOGLE_REDIRECT_URI,
-        grant_type: "authorization_code",
-      }),
-    });
-    if (!tokenResponse.ok) {
-      return res.redirect("/?calendar=token-error");
-    }
-    const tokenData = await tokenResponse.json();
-    const tokenExpiry = tokenData.expires_in
-      ? new Date(Date.now() + Number(tokenData.expires_in) * 1000).toISOString()
-      : null;
-    await saveGoogleConnection({
-      userEmail: req.session.user.email,
-      accessToken: tokenData.access_token,
-      refreshToken: tokenData.refresh_token || null,
-      tokenExpiry,
-    });
-    return res.redirect("/?calendar=connected");
-  } catch (err) {
-    return res.redirect("/?calendar=error");
-  }
-});
-
-app.post("/api/calendar/google/disconnect", requireUser, async (req, res) => {
-  try {
-    await dbRunAsync(
-      "DELETE FROM user_calendar_connections WHERE user_email = ? AND provider = 'google'",
-      [req.session.user.email],
-    );
-    return res.json({ ok: true });
-  } catch (err) {
-    return res.status(500).json({ error: "Disconnect failed" });
-  }
-});
-
 app.get("/api/signups/:id/calendar.ics", requireUser, (req, res) => {
   const signupId = Number(req.params.id);
   const email = req.session.user.email;
@@ -1448,8 +1094,8 @@ app.get("/api/signups/:id/calendar.ics", requireUser, (req, res) => {
       const host = req.get("host") || "idopont-foglalas.local";
       const uid = `signup-${row.id}@${host}`;
       const description = [
-        row.coach ? `Edzo: ${row.coach}` : null,
-        `Feliratkozo: ${email}`,
+        row.coach ? `Edző: ${row.coach}` : null,
+        `Feliratkozó: ${email}`,
       ]
         .filter(Boolean)
         .join("\\n");
@@ -1459,7 +1105,7 @@ app.get("/api/signups/:id/calendar.ics", requireUser, (req, res) => {
         description,
         startsAt,
         endsAt,
-        location: row.location,
+        location: row.location || CLASS_LOCATION,
       });
 
       res.setHeader("Content-Type", "text/calendar; charset=utf-8");
@@ -1570,17 +1216,6 @@ app.post("/api/classes/:id/signup", requireUser, (req, res) => {
                 if (insertErr) {
                   return res.status(500).json({ error: "Database error" });
                 }
-                createGoogleCalendarEventForSignup({
-                  signupId: this.lastID,
-                  email,
-                  classRow,
-                  fullName,
-                }).catch((syncErr) => {
-                  console.warn(
-                    "Google Calendar sync (create) failed",
-                    syncErr.message || syncErr,
-                  );
-                });
                 createNotification(
                   "signup",
                   `Uj feliratkozas: ${fullName} (${email}) - ${classRow.title} (${classRow.starts_at})`,
@@ -1673,16 +1308,6 @@ app.post("/api/signups/:id/cancel", requireUser, (req, res) => {
                           "cancel",
                           `Lemondas: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
                         );
-                        deleteGoogleCalendarEventForSignup({
-                          signupId,
-                          email,
-                          eventId: row.calendar_event_id,
-                        }).catch((syncErr) => {
-                          console.warn(
-                            "Google Calendar sync (delete) failed",
-                            syncErr.message || syncErr,
-                          );
-                        });
                         sendTelegramMessage(
                           `Lemondás: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
                         );
@@ -1697,16 +1322,6 @@ app.post("/api/signups/:id/cancel", requireUser, (req, res) => {
                 "cancel",
                 `Lemondas: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
               );
-              deleteGoogleCalendarEventForSignup({
-                signupId,
-                email,
-                eventId: row.calendar_event_id,
-              }).catch((syncErr) => {
-                console.warn(
-                  "Google Calendar sync (delete) failed",
-                  syncErr.message || syncErr,
-                );
-              });
               sendTelegramMessage(
                 `Lemondás: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
               );
