@@ -1098,7 +1098,7 @@ app.get("/api/signups/:id/calendar.ics", requireUser, (req, res) => {
         .join("\\n");
       const ics = buildSignupIcs({
         uid,
-        title: row.title || "MuscleFit Edzés",
+        title: "MuscleFit Edzés",
         description,
         startsAt,
         endsAt,
