@@ -113,6 +113,18 @@ const MAX_SIGNUPS = 6;
 
 const FRIDAY_DISABLED_SLOTS = new Set(["16:00", "17:00", "18:00", "19:00"]);
 
+// Helper function for API calls that maintains session cookies
+const apiFetch = (url, options = {}) => {
+  return fetch(url, {
+    credentials: "same-origin",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+};
+
 const isFridayDisabledClass = (startsAtIso) => {
   const startsAt = toBudapestDate(startsAtIso);
   const weekday = startsAt.getDay();
@@ -239,7 +251,7 @@ const subscribeToPush = async () => {
     return;
   }
   const registration = await navigator.serviceWorker.register("/sw.js");
-  const keyResponse = await fetch("/api/push/vapid-public-key", {
+  const keyResponse = await apiFetch("/api/push/vapid-public-key", {
     credentials: "same-origin",
   });
   if (!keyResponse.ok) {
@@ -254,7 +266,7 @@ const subscribeToPush = async () => {
     userVisibleOnly: true,
     applicationServerKey: urlBase64ToUint8Array(publicKey),
   });
-  const saveResponse = await fetch("/api/push/subscribe", {
+  const saveResponse = await apiFetch("/api/push/subscribe", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin",
@@ -671,7 +683,7 @@ const cancelAdminSignup = async (id, statusElement) => {
   if (!confirmed) {
     return;
   }
-  const response = await fetch(`/api/admin/signups/${id}/cancel`, {
+  const response = await apiFetch(`/api/admin/signups/${id}/cancel`, {
     method: "POST",
   });
   if (handleAdminUnauthorized(response)) {
@@ -710,7 +722,7 @@ const addGuestToClass = async (
     setCardStatus(statusElement, "Ez az email már fel van iratkozva.");
     return;
   }
-  const response = await fetch(`/api/admin/classes/${classId}/signups`, {
+  const response = await apiFetch(`/api/admin/classes/${classId}/signups`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, email }),
@@ -739,7 +751,7 @@ const addRegisteredUserToClass = async (classId, userEmail, statusElement) => {
     setCardStatus(statusElement, "Válassz regisztrált tagot.");
     return;
   }
-  const response = await fetch(`/api/admin/classes/${classId}/signups`, {
+  const response = await apiFetch(`/api/admin/classes/${classId}/signups`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ userEmail }),
@@ -758,11 +770,14 @@ const addRegisteredUserToClass = async (classId, userEmail, statusElement) => {
 };
 
 const toggleClassAvailability = async (classId, isActive, statusElement) => {
-  const response = await fetch(`/api/admin/classes/${classId}/availability`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ isActive }),
-  });
+  const response = await apiFetch(
+    `/api/admin/classes/${classId}/availability`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isActive }),
+    },
+  );
   if (handleAdminUnauthorized(response)) {
     return;
   }
@@ -851,7 +866,7 @@ const loadPass = async () => {
     renderPass(null);
     return;
   }
-  const response = await fetch("/api/passes/me");
+  const response = await apiFetch("/api/passes/me");
   if (!response.ok) {
     renderPass(null);
     return;
@@ -984,7 +999,7 @@ const openSignup = (item) => {
 };
 
 const loadClasses = async () => {
-  const response = await fetch("/api/classes");
+  const response = await apiFetch("/api/classes");
   const data = await response.json();
   renderClasses(data);
 };
@@ -996,7 +1011,7 @@ const loadMySignups = async () => {
     renderClasses(lastClasses);
     return;
   }
-  const response = await fetch("/api/signups/me");
+  const response = await apiFetch("/api/signups/me");
   if (!response.ok) {
     renderMySignups([]);
     renderSignupsMenu();
@@ -1012,9 +1027,9 @@ const loadMySignups = async () => {
 const loadAdminData = async () => {
   const [classesResponse, notificationsResponse, usersResponse] =
     await Promise.all([
-      fetch("/api/admin/classes"),
-      fetch("/api/admin/notifications"),
-      fetch("/api/admin/users/with-pass"),
+      apiFetch("/api/admin/classes"),
+      apiFetch("/api/admin/notifications"),
+      apiFetch("/api/admin/users/with-pass"),
     ]);
 
   if (classesResponse.status === 401) {
@@ -1059,7 +1074,9 @@ const renderAdminPass = (data) => {
     return;
   }
   passTotalInput.value = String(data.pass.total);
-  passRemainingInput.value = String(data.pass.total - data.pass.remaining);
+  // Use actual pass_uses count instead of derived remaining to stay in sync
+  const actualUsed = Array.isArray(data.uses) ? data.uses.length : 0;
+  passRemainingInput.value = String(actualUsed);
   if (!data.uses || data.uses.length === 0) {
     passUsesAdmin.innerHTML =
       '<div class="notice">Nincs még levont alkalom.</div>';
@@ -1171,7 +1188,7 @@ const renderAdminUsersPass = (users) => {
 };
 
 const updateAdminUser = async (currentEmail, payload) => {
-  const response = await fetch(
+  const response = await apiFetch(
     `/api/admin/users/${encodeURIComponent(currentEmail)}`,
     {
       method: "PUT",
@@ -1204,7 +1221,7 @@ const deleteAdminUser = async (email) => {
   if (!confirmed) {
     return;
   }
-  const response = await fetch(
+  const response = await apiFetch(
     `/api/admin/users/${encodeURIComponent(email)}`,
     {
       method: "DELETE",
@@ -1237,7 +1254,7 @@ const loadAdminPass = async () => {
     return;
   }
   passAdminStatus.textContent = "";
-  const response = await fetch(
+  const response = await apiFetch(
     `/api/admin/passes/${encodeURIComponent(email)}`,
   );
   if (handleAdminUnauthorized(response)) {
@@ -1264,7 +1281,7 @@ const saveAdminPass = async () => {
   const total = passTotalInput.value;
   const used = passRemainingInput.value;
   const remaining = String(Math.max(0, Number(total) - Number(used)));
-  const response = await fetch("/api/admin/passes/set", {
+  const response = await apiFetch("/api/admin/passes/set", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, total, remaining }),
@@ -1302,7 +1319,7 @@ const addPassUse = async () => {
     body.used_at = usedAt;
   }
 
-  const response = await fetch("/api/admin/passes/use", {
+  const response = await apiFetch("/api/admin/passes/use", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -1323,7 +1340,7 @@ const addPassUse = async () => {
 };
 
 const deletePassUse = async (useId) => {
-  const response = await fetch(`/api/admin/passes/use/${useId}`, {
+  const response = await apiFetch(`/api/admin/passes/use/${useId}`, {
     method: "DELETE",
   });
   if (handleAdminUnauthorized(response)) {
@@ -1355,7 +1372,7 @@ const handleAdminUnauthorized = (response) => {
 
 const loadUser = async () => {
   try {
-    const response = await fetch("/api/auth/me");
+    const response = await apiFetch("/api/auth/me");
     if (!response.ok) {
       currentUser = null;
       updateUserUI();
@@ -1446,7 +1463,7 @@ const loadCalendarSyncStatus = async () => {
     return;
   }
   renderCalendarSync(null);
-  const response = await fetch("/api/calendar/google/status");
+  const response = await apiFetch("/api/calendar/google/status");
   if (!response.ok) {
     renderCalendarSync({ configured: false, connected: false });
     return;
@@ -1536,7 +1553,7 @@ const setAuthMode = (mode) => {
 };
 
 const cancelSignup = async (id) => {
-  const response = await fetch(`/api/signups/${id}/cancel`, {
+  const response = await apiFetch(`/api/signups/${id}/cancel`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
@@ -1565,7 +1582,7 @@ signupForm.addEventListener("submit", async (event) => {
     signupMessage.textContent = "Erre az órára már fel vagy iratkozva.";
     return;
   }
-  const response = await fetch(`/api/classes/${classId}/signup`, {
+  const response = await apiFetch(`/api/classes/${classId}/signup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
@@ -1593,7 +1610,7 @@ userLoginForm.addEventListener("submit", async (event) => {
   const passwordValue = userPassword ? userPassword.value : "";
   let response;
   if (authMode === "register") {
-    response = await fetch("/api/auth/register", {
+    response = await apiFetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1607,7 +1624,7 @@ userLoginForm.addEventListener("submit", async (event) => {
       }),
     });
   } else {
-    response = await fetch("/api/auth/login", {
+    response = await apiFetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: emailValue, password: passwordValue }),
@@ -1636,7 +1653,7 @@ userLoginForm.addEventListener("submit", async (event) => {
 adminLoginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   adminLoginMessage.textContent = "";
-  const response = await fetch("/api/admin/login", {
+  const response = await apiFetch("/api/admin/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1658,7 +1675,7 @@ adminLoginForm.addEventListener("submit", async (event) => {
 });
 
 adminLogout.addEventListener("click", async () => {
-  await fetch("/api/admin/logout", { method: "POST" });
+  await apiFetch("/api/admin/logout", { method: "POST" });
   adminPanel.hidden = true;
   adminLoginForm.parentElement.hidden = false;
   if (adminPill) {
@@ -1673,7 +1690,7 @@ regenerateClassesButton?.addEventListener("click", async () => {
   if (!confirmed) {
     return;
   }
-  const response = await fetch("/api/admin/classes/regenerate", {
+  const response = await apiFetch("/api/admin/classes/regenerate", {
     method: "POST",
   });
   if (handleAdminUnauthorized(response)) {
@@ -1702,7 +1719,7 @@ assignPassButton?.addEventListener("click", async () => {
     passAdminStatus.textContent = "Email megadása kötelező.";
     return;
   }
-  const response = await fetch("/api/admin/passes/assign", {
+  const response = await apiFetch("/api/admin/passes/assign", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
@@ -1791,7 +1808,7 @@ testTelegramButton?.addEventListener("click", async () => {
     return;
   }
   telegramStatus.textContent = "Küldöm a teszt üzenetet...";
-  const response = await fetch("/api/admin/telegram/test", {
+  const response = await apiFetch("/api/admin/telegram/test", {
     method: "POST",
   });
   if (!response.ok) {
@@ -1833,7 +1850,7 @@ assignPassButton?.addEventListener("click", async () => {
     passAdminStatus.textContent = "Email megadása kötelező.";
     return;
   }
-  const response = await fetch("/api/admin/passes/assign", {
+  const response = await apiFetch("/api/admin/passes/assign", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
@@ -1883,7 +1900,7 @@ connectGoogleCalendarButton?.addEventListener("click", async () => {
   if (calendarSyncStatus) {
     calendarSyncStatus.textContent = "Google kapcsolat indítása...";
   }
-  const response = await fetch("/api/calendar/google/connect");
+  const response = await apiFetch("/api/calendar/google/connect");
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     if (calendarSyncStatus) {
@@ -1912,7 +1929,7 @@ disconnectGoogleCalendarButton?.addEventListener("click", async () => {
   if (calendarSyncStatus) {
     calendarSyncStatus.textContent = "Google kapcsolat bontása...";
   }
-  const response = await fetch("/api/calendar/google/disconnect", {
+  const response = await apiFetch("/api/calendar/google/disconnect", {
     method: "POST",
   });
   if (!response.ok) {

@@ -1729,38 +1729,34 @@ app.post("/api/admin/passes/set", requireAdmin, (req, res) => {
         if (findErr) {
           return res.status(500).json({ error: "Database error" });
         }
-        if (!passRow) {
-          const createdAt = new Date().toISOString();
-          db.run(
-            "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)",
-            [email, totalValue, remainingValue, createdAt],
-            function onInsert(insertErr) {
-              if (insertErr) {
-                return res.status(500).json({ error: "Database error" });
-              }
-              return res.json({
-                id: this.lastID,
-                total: totalValue,
-                remaining: remainingValue,
-              });
-            },
-          );
-          return;
-        }
-        db.run(
-          "UPDATE passes SET total = ?, remaining = ? WHERE id = ?",
-          [totalValue, remainingValue, passRow.id],
-          (updateErr) => {
+
+        // Helper function to set or create pass
+        const setPassValue = (passId, shouldInsert) => {
+          const query = shouldInsert
+            ? "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)"
+            : "UPDATE passes SET total = ?, remaining = ? WHERE id = ?";
+
+          const params = shouldInsert
+            ? [email, totalValue, remainingValue, new Date().toISOString()]
+            : [totalValue, remainingValue, passId];
+
+          db.run(query, params, function onUpdate(updateErr) {
             if (updateErr) {
               return res.status(500).json({ error: "Database error" });
             }
             return res.json({
-              id: passRow.id,
+              id: shouldInsert ? this.lastID : passId,
               total: totalValue,
               remaining: remainingValue,
             });
-          },
-        );
+          });
+        };
+
+        if (!passRow) {
+          setPassValue(null, true);
+        } else {
+          setPassValue(passRow.id, false);
+        }
       },
     );
   });
