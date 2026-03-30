@@ -250,6 +250,12 @@ const initDb = async () => {
     );
     // Remove pass_used column if it exists (cleanup from old schema)
     await pgPool.query(`ALTER TABLE pass_uses DROP COLUMN IF EXISTS pass_used`);
+    // Ensure class_id is nullable (migration from old schema)
+    await pgPool
+      .query(`ALTER TABLE pass_uses ALTER COLUMN class_id DROP NOT NULL`)
+      .catch(() => {
+        // Ignore if column doesn't have NOT NULL constraint
+      });
     await pgPool.query(
       `CREATE TABLE IF NOT EXISTS user_calendar_connections (
         id SERIAL PRIMARY KEY,
@@ -365,11 +371,94 @@ const initDb = async () => {
         () => {},
       );
       db.run("ALTER TABLE classes ADD COLUMN location TEXT", () => {});
-      // Migration: Remove pass_used column if it exists (cleanup from old schema)
-      db.run("ALTER TABLE pass_uses DROP COLUMN IF EXISTS pass_used", (err) => {
-        if (err) {
-          console.warn("Could not drop pass_used column:", err.message);
+      // Migration: Safe migration of pass_uses table to make class_id nullable
+      db.run(`PRAGMA table_info(pass_uses)`, (infoErr, cols) => {
+        if (infoErr || !cols) {
+          console.log("pass_uses table info check passed");
+          return;
         }
+
+        // Check if class_id column has NOT NULL constraint (value 1 means NOT NULL)
+        const classIdColumn = cols.find((col) => col.name === "class_id");
+        if (!classIdColumn || classIdColumn.notnull === 0) {
+          console.log("pass_uses.class_id is already nullable");
+          return;
+        }
+
+        console.log(
+          "Migrating pass_uses table to make class_id nullable (preserving data)...",
+        );
+
+        // Safe migration: rename old table, create new one with correct schema, copy data
+        db.run("ALTER TABLE pass_uses RENAME TO pass_uses_old", (renameErr) => {
+          if (renameErr) {
+            console.warn(
+              "Migration: Could not rename old table:",
+              renameErr.message,
+            );
+            return;
+          }
+
+          db.run(
+            `CREATE TABLE pass_uses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pass_id INTEGER NOT NULL,
+                class_id INTEGER,
+                used_at TEXT NOT NULL,
+                FOREIGN KEY(pass_id) REFERENCES passes(id),
+                FOREIGN KEY(class_id) REFERENCES classes(id)
+              )`,
+            (createErr) => {
+              if (createErr) {
+                console.warn(
+                  "Migration: Could not create new table:",
+                  createErr.message,
+                );
+                // Rollback
+                db.run(
+                  "ALTER TABLE pass_uses_old RENAME TO pass_uses",
+                  () => {},
+                );
+                return;
+              }
+
+              // Copy data from old table
+              db.run(
+                `INSERT INTO pass_uses (id, pass_id, class_id, used_at) 
+                   SELECT id, pass_id, class_id, used_at FROM pass_uses_old`,
+                (insertErr) => {
+                  if (insertErr) {
+                    console.warn(
+                      "Migration: Could not copy data:",
+                      insertErr.message,
+                    );
+                    // Rollback
+                    db.run("DROP TABLE pass_uses", () => {});
+                    db.run(
+                      "ALTER TABLE pass_uses_old RENAME TO pass_uses",
+                      () => {},
+                    );
+                    return;
+                  }
+
+                  // Drop old table
+                  db.run("DROP TABLE pass_uses_old", (dropErr) => {
+                    if (dropErr) {
+                      console.warn(
+                        "Migration: Could not drop old table:",
+                        dropErr.message,
+                      );
+                    } else {
+                      console.log(
+                        "Migration complete! pass_uses table migrated successfully.",
+                      );
+                    }
+                  });
+                },
+              );
+            },
+          );
+        });
       });
       db.run("SELECT 1", () => resolve());
     });
