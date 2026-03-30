@@ -1844,3 +1844,39 @@ const scheduleWeekRefresh = () => {
     scheduleWeekRefresh();
   }, delay);
 };
+
+// Easter Banner
+const initEasterBanner = () => {
+  const today = new Date();
+  const month = today.getMonth() + 1; // 1-12
+  const day = today.getDate();
+
+  // Show banner from March 30 to April 30
+  if ((month === 3 && day >= 30) || month === 4) {
+    const bannerEl = document.getElementById("easter-banner");
+    const bannerTextEl = document.getElementById("easter-banner-text");
+
+    // Determine text based on date
+    // With eggs: March 30 - April 6
+    // Without eggs: April 7 - April 30
+    if ((month === 3 && day >= 30) || (month === 4 && day <= 6)) {
+      bannerTextEl.textContent = "🥚 Üdvözöllek! 🥚";
+    } else {
+      bannerTextEl.textContent = "Üdvözöllek!";
+    }
+
+    // Show banner
+    bannerEl.removeAttribute("hidden");
+
+    // Auto-hide after 2.5 seconds
+    setTimeout(() => {
+      if (!bannerEl.hidden) {
+        bannerEl.classList.add("hidden");
+        setTimeout(() => bannerEl.setAttribute("hidden", ""), 400);
+      }
+    }, 2500);
+  }
+};
+
+// Initialize Easter banner
+initEasterBanner();
