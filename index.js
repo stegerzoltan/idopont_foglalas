@@ -248,6 +248,8 @@ const initDb = async () => {
         used_at TEXT NOT NULL
       )`,
     );
+    // Remove pass_used column if it exists (cleanup from old schema)
+    await pgPool.query(`ALTER TABLE pass_uses DROP COLUMN IF EXISTS pass_used`);
     await pgPool.query(
       `CREATE TABLE IF NOT EXISTS user_calendar_connections (
         id SERIAL PRIMARY KEY,
@@ -363,6 +365,12 @@ const initDb = async () => {
         () => {},
       );
       db.run("ALTER TABLE classes ADD COLUMN location TEXT", () => {});
+      // Migration: Remove pass_used column if it exists (cleanup from old schema)
+      db.run("ALTER TABLE pass_uses DROP COLUMN IF EXISTS pass_used", (err) => {
+        if (err) {
+          console.warn("Could not drop pass_used column:", err.message);
+        }
+      });
       db.run("SELECT 1", () => resolve());
     });
   });
