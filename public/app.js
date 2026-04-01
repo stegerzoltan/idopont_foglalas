@@ -1134,6 +1134,7 @@ const renderAdminUsersPass = (users) => {
       <td>${createdLabel}</td>
       <td class="form-actions">
         <button class="primary" data-action="save-user">Mentés</button>
+        <button class="ghost" data-action="edit-password">Jelszó</button>
         <button class="ghost" data-action="delete-user">Törlés</button>
       </td>
     `;
@@ -1142,6 +1143,9 @@ const renderAdminUsersPass = (users) => {
     const birthDateInput = row.querySelector('[data-role="birth-date"]');
     const phoneInput = row.querySelector('[data-role="phone"]');
     const saveButton = row.querySelector('[data-action="save-user"]');
+    const editPasswordButton = row.querySelector(
+      '[data-action="edit-password"]',
+    );
     const deleteButton = row.querySelector('[data-action="delete-user"]');
 
     if (fullNameInput) {
@@ -1156,6 +1160,22 @@ const renderAdminUsersPass = (users) => {
     if (phoneInput) {
       phoneInput.value = user.phone || "";
     }
+
+    editPasswordButton?.addEventListener("click", () => {
+      const newPassword = window.prompt(
+        `Új jelszó felhasználó számára: ${user.email}`,
+        "",
+      );
+      if (newPassword && newPassword.trim()) {
+        updateAdminUser(user.email, {
+          fullName: fullNameInput ? fullNameInput.value.trim() : "",
+          email: emailInput ? emailInput.value.trim() : "",
+          birthDate: birthDateInput ? birthDateInput.value.trim() : "",
+          phone: phoneInput ? phoneInput.value.trim() : "",
+          password: newPassword.trim(),
+        });
+      }
+    });
 
     saveButton?.addEventListener("click", () => {
       updateAdminUser(user.email, {
