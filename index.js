@@ -935,15 +935,16 @@ app.get("/api/admin/classes/last7days", requireAdmin, (req, res) => {
 });
 
 app.post("/api/auth/register", (req, res) => {
-  const {
-    fullName,
-    email,
-    birthDate,
-    phone,
-    password,
-    consentText,
-    consentAccepted,
-  } = req.body;
+  const fullName = String(req.body.fullName || "").trim();
+  const email = String(req.body.email || "")
+    .trim()
+    .toLowerCase();
+  const birthDate = String(req.body.birthDate || "").trim();
+  const phone = String(req.body.phone || "").trim();
+  const password = String(req.body.password || "").trim();
+  const consentText = req.body.consentText;
+  const consentAccepted = req.body.consentAccepted;
+
   if (!fullName || !email || !birthDate || !phone || !password) {
     return res.status(400).json({ error: "Missing required fields" });
   }
@@ -974,18 +975,26 @@ app.post("/api/auth/register", (req, res) => {
         return res.status(500).json({ error: "Database error" });
       }
       req.session.user = { fullName, email, birthDate, phone };
-      return res.json({ ok: true, user: req.session.user });
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          return res.status(500).json({ error: "Session save error" });
+        }
+        return res.json({ ok: true, user: req.session.user });
+      });
     },
   );
 });
 
 app.post("/api/auth/login", (req, res) => {
-  const { email, password } = req.body;
+  const email = String(req.body.email || "")
+    .trim()
+    .toLowerCase();
+  const password = String(req.body.password || "").trim();
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password are required" });
   }
   db.get(
-    "SELECT full_name, email, birth_date, phone, password_hash, password_salt FROM users WHERE email = ?",
+    "SELECT full_name, email, birth_date, phone, password_hash, password_salt FROM users WHERE LOWER(email) = ?",
     [email],
     (err, row) => {
       if (err) {
@@ -997,7 +1006,7 @@ app.post("/api/auth/login", (req, res) => {
       if (!row.password_hash || !row.password_salt) {
         const { hash, salt } = hashPassword(password);
         db.run(
-          "UPDATE users SET password_hash = ?, password_salt = ? WHERE email = ?",
+          "UPDATE users SET password_hash = ?, password_salt = ? WHERE LOWER(email) = ?",
           [hash, salt, email],
           (updateErr) => {
             if (updateErr) {
@@ -1009,7 +1018,12 @@ app.post("/api/auth/login", (req, res) => {
               birthDate: row.birth_date,
               phone: row.phone,
             };
-            return res.json({ ok: true, user: req.session.user });
+            req.session.save((saveErr) => {
+              if (saveErr) {
+                return res.status(500).json({ error: "Session save error" });
+              }
+              return res.json({ ok: true, user: req.session.user });
+            });
           },
         );
         return;
@@ -1023,14 +1037,24 @@ app.post("/api/auth/login", (req, res) => {
         birthDate: row.birth_date,
         phone: row.phone,
       };
-      return res.json({ ok: true, user: req.session.user });
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          return res.status(500).json({ error: "Session save error" });
+        }
+        return res.json({ ok: true, user: req.session.user });
+      });
     },
   );
 });
 
 app.post("/api/auth/logout", (req, res) => {
   req.session.user = null;
-  return res.json({ ok: true });
+  req.session.save((saveErr) => {
+    if (saveErr) {
+      return res.status(500).json({ error: "Session save error" });
+    }
+    return res.json({ ok: true });
+  });
 });
 
 app.get("/api/auth/me", (req, res) => {
@@ -1118,7 +1142,7 @@ app.get("/api/signups/:id/calendar.ics", requireUser, (req, res) => {
 app.get("/api/passes/me", requireUser, (req, res) => {
   const { email } = req.session.user;
   db.get(
-    "SELECT * FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
+    "SELECT * FROM passes WHERE LOWER(user_email) = ? ORDER BY created_at DESC LIMIT 1",
     [email],
     (err, passRow) => {
       if (err) {
@@ -1360,7 +1384,8 @@ app.get("/api/signups/me", requireUser, (req, res) => {
 });
 
 app.post("/api/admin/login", (req, res) => {
-  const { email, password } = req.body;
+  const email = String(req.body.email || "").trim();
+  const password = String(req.body.password || "").trim();
   if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
     req.session.isAdmin = true;
     return res.json({ ok: true });
@@ -1486,51 +1511,55 @@ app.post("/api/admin/passes/set", requireAdmin, (req, res) => {
   if (!Number.isFinite(remainingValue) || remainingValue < 0) {
     return res.status(400).json({ error: "Invalid remaining" });
   }
-  db.get("SELECT email FROM users WHERE email = ?", [email], (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: "Database error" });
-    }
-    if (!row) {
-      return res.status(404).json({ error: "User not found" });
-    }
-    db.get(
-      "SELECT id FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
-      [email],
-      (findErr, passRow) => {
-        if (findErr) {
-          return res.status(500).json({ error: "Database error" });
-        }
+  db.get(
+    "SELECT email FROM users WHERE LOWER(email) = ?",
+    [email],
+    (err, row) => {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      if (!row) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      db.get(
+        "SELECT id FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
+        [email],
+        (findErr, passRow) => {
+          if (findErr) {
+            return res.status(500).json({ error: "Database error" });
+          }
 
-        // Helper function to set or create pass
-        const setPassValue = (passId, shouldInsert) => {
-          const query = shouldInsert
-            ? "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)"
-            : "UPDATE passes SET total = ?, remaining = ? WHERE id = ?";
+          // Helper function to set or create pass
+          const setPassValue = (passId, shouldInsert) => {
+            const query = shouldInsert
+              ? "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)"
+              : "UPDATE passes SET total = ?, remaining = ? WHERE id = ?";
 
-          const params = shouldInsert
-            ? [email, totalValue, remainingValue, new Date().toISOString()]
-            : [totalValue, remainingValue, passId];
+            const params = shouldInsert
+              ? [email, totalValue, remainingValue, new Date().toISOString()]
+              : [totalValue, remainingValue, passId];
 
-          db.run(query, params, function onUpdate(updateErr) {
-            if (updateErr) {
-              return res.status(500).json({ error: "Database error" });
-            }
-            return res.json({
-              id: shouldInsert ? this.lastID : passId,
-              total: totalValue,
-              remaining: remainingValue,
+            db.run(query, params, function onUpdate(updateErr) {
+              if (updateErr) {
+                return res.status(500).json({ error: "Database error" });
+              }
+              return res.json({
+                id: shouldInsert ? this.lastID : passId,
+                total: totalValue,
+                remaining: remainingValue,
+              });
             });
-          });
-        };
+          };
 
-        if (!passRow) {
-          setPassValue(null, true);
-        } else {
-          setPassValue(passRow.id, false);
-        }
-      },
-    );
-  });
+          if (!passRow) {
+            setPassValue(null, true);
+          } else {
+            setPassValue(passRow.id, false);
+          }
+        },
+      );
+    },
+  );
 });
 
 app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
@@ -1541,7 +1570,7 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
 
   // Get the pass first
   db.get(
-    "SELECT id, total FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
+    "SELECT id, total FROM passes WHERE LOWER(user_email) = ? ORDER BY created_at DESC LIMIT 1",
     [email],
     (err, passRow) => {
       if (err) {
@@ -1767,7 +1796,7 @@ app.put("/api/admin/users/:email", requireAdmin, (req, res) => {
   }
 
   db.get(
-    "SELECT email FROM users WHERE email = ?",
+    "SELECT email FROM users WHERE LOWER(email) = ?",
     [currentEmail],
     (err, currentUserRow) => {
       if (err) {
@@ -1786,11 +1815,11 @@ app.put("/api/admin/users/:email", requireAdmin, (req, res) => {
           currentEmail,
         ];
         let sql =
-          "UPDATE users SET full_name = ?, email = ?, birth_date = ?, phone = ? WHERE email = ?";
+          "UPDATE users SET full_name = ?, email = ?, birth_date = ?, phone = ? WHERE LOWER(email) = ?";
         if (nextPassword) {
           const { hash, salt } = hashPassword(nextPassword);
           sql =
-            "UPDATE users SET full_name = ?, email = ?, birth_date = ?, phone = ?, password_hash = ?, password_salt = ? WHERE email = ?";
+            "UPDATE users SET full_name = ?, email = ?, birth_date = ?, phone = ?, password_hash = ?, password_salt = ? WHERE LOWER(email) = ?";
           values.splice(4, 0, hash, salt);
         }
 
@@ -1809,7 +1838,7 @@ app.put("/api/admin/users/:email", requireAdmin, (req, res) => {
 
           const updateSignups = () => {
             db.run(
-              "UPDATE signups SET email = ?, name = ? WHERE email = ?",
+              "UPDATE signups SET email = ?, name = ? WHERE LOWER(email) = ?",
               [nextEmail, nextName, currentEmail],
               (signupErr) => {
                 if (signupErr) {
@@ -1822,7 +1851,7 @@ app.put("/api/admin/users/:email", requireAdmin, (req, res) => {
 
           const updatePasses = () => {
             db.run(
-              "UPDATE passes SET user_email = ? WHERE user_email = ?",
+              "UPDATE passes SET user_email = ? WHERE LOWER(user_email) = ?",
               [nextEmail, currentEmail],
               (passErr) => {
                 if (passErr) {
@@ -1850,7 +1879,7 @@ app.put("/api/admin/users/:email", requireAdmin, (req, res) => {
       }
 
       db.get(
-        "SELECT email FROM users WHERE email = ?",
+        "SELECT email FROM users WHERE LOWER(email) = ?",
         [nextEmail],
         (dupeErr, dupeRow) => {
           if (dupeErr) {
@@ -1904,73 +1933,81 @@ app.delete("/api/admin/users/:email", requireAdmin, (req, res) => {
   if (!email) {
     return res.status(400).json({ error: "Email required" });
   }
-  db.get("SELECT email FROM users WHERE email = ?", [email], (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: "Database error" });
-    }
-    if (!row) {
-      return res.status(404).json({ error: "User not found" });
-    }
-    db.all(
-      "SELECT id FROM passes WHERE user_email = ?",
-      [email],
-      (passesErr, passRows) => {
-        if (passesErr) {
-          return res.status(500).json({ error: "Database error" });
-        }
-        const passIds = passRows.map((passRow) => passRow.id);
-        const deletePassUses = (index) => {
-          if (index >= passIds.length) {
-            return deletePasses();
+  db.get(
+    "SELECT email FROM users WHERE LOWER(email) = ?",
+    [email],
+    (err, row) => {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      if (!row) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      db.all(
+        "SELECT id FROM passes WHERE LOWER(user_email) = ?",
+        [email],
+        (passesErr, passRows) => {
+          if (passesErr) {
+            return res.status(500).json({ error: "Database error" });
           }
-          db.run(
-            "DELETE FROM pass_uses WHERE pass_id = ?",
-            [passIds[index]],
-            (delErr) => {
-              if (delErr) {
-                return res.status(500).json({ error: "Database error" });
-              }
-              return deletePassUses(index + 1);
-            },
-          );
-        };
-        const deletePasses = () => {
-          db.run(
-            "DELETE FROM passes WHERE user_email = ?",
-            [email],
-            (passDelErr) => {
-              if (passDelErr) {
-                return res.status(500).json({ error: "Database error" });
-              }
-              return deleteSignups();
-            },
-          );
-        };
-        const deleteSignups = () => {
-          db.run(
-            "DELETE FROM signups WHERE email = ?",
-            [email],
-            (signupDelErr) => {
-              if (signupDelErr) {
-                return res.status(500).json({ error: "Database error" });
-              }
-              return deleteUser();
-            },
-          );
-        };
-        const deleteUser = () => {
-          db.run("DELETE FROM users WHERE email = ?", [email], (userErr) => {
-            if (userErr) {
-              return res.status(500).json({ error: "Database error" });
+          const passIds = passRows.map((passRow) => passRow.id);
+          const deletePassUses = (index) => {
+            if (index >= passIds.length) {
+              return deletePasses();
             }
-            return res.json({ ok: true });
-          });
-        };
+            db.run(
+              "DELETE FROM pass_uses WHERE pass_id = ?",
+              [passIds[index]],
+              (delErr) => {
+                if (delErr) {
+                  return res.status(500).json({ error: "Database error" });
+                }
+                return deletePassUses(index + 1);
+              },
+            );
+          };
+          const deletePasses = () => {
+            db.run(
+              "DELETE FROM passes WHERE LOWER(user_email) = ?",
+              [email],
+              (passDelErr) => {
+                if (passDelErr) {
+                  return res.status(500).json({ error: "Database error" });
+                }
+                return deleteSignups();
+              },
+            );
+          };
+          const deleteSignups = () => {
+            db.run(
+              "DELETE FROM signups WHERE LOWER(email) = ?",
+              [email],
+              (signupDelErr) => {
+                if (signupDelErr) {
+                  return res.status(500).json({ error: "Database error" });
+                }
+                return deleteUser();
+              },
+            );
+          };
+          const deleteUser = () => {
+            db.run(
+              "DELETE FROM users WHERE LOWER(email) = ?",
+              [email],
+              (userErr) => {
+                if (userErr) {
+                  return res.status(500).json({ error: "Database error" });
+                }
+                return res.json({ ok: true });
+              },
+            );
+          };
 
-        return deletePassUses(0);
-      },
-    );
-  });
+          return deletePassUses(0);
+        },
+      );
+    },
+  );
 });
 
 app.post("/api/admin/classes/:id/availability", requireAdmin, (req, res) => {

@@ -146,10 +146,16 @@ const formatTimeKey = (iso) => {
 };
 
 const compactSignupName = (value) => {
-  const parts = String(value || "")
+  let parts = String(value || "")
     .trim()
     .split(/\s+/)
     .filter(Boolean);
+
+  // Remove "Dr" or "Dr." prefix if present
+  if (parts.length > 0 && (parts[0] === "Dr" || parts[0] === "Dr.")) {
+    parts = parts.slice(1);
+  }
+
   if (parts.length <= 1) {
     return parts[0] || "";
   }
@@ -1572,8 +1578,8 @@ adminLoginForm.addEventListener("submit", async (event) => {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      email: document.getElementById("admin-email").value,
-      password: document.getElementById("admin-password").value,
+      email: document.getElementById("admin-email").value.trim(),
+      password: document.getElementById("admin-password").value.trim(),
     }),
   });
 
