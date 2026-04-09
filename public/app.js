@@ -14,6 +14,7 @@ const openUser = document.getElementById("open-user");
 const userModal = document.getElementById("user-modal");
 const userLoginForm = document.getElementById("user-login-form");
 const userLoginMessage = document.getElementById("user-login-message");
+const userLogoutButton = document.getElementById("user-logout-button");
 
 const authLoginButton = document.getElementById("auth-login");
 const authRegisterButton = document.getElementById("auth-register");
@@ -101,7 +102,7 @@ const TIME_SLOTS = [
   "19:00",
 ];
 
-const MAX_SIGNUPS = 6;
+const MAX_SIGNUPS = 10;
 
 const FRIDAY_DISABLED_SLOTS = new Set(["16:00", "17:00", "18:00", "19:00"]);
 
@@ -115,6 +116,69 @@ const apiFetch = (url, options = {}) => {
       ...options.headers,
     },
   });
+};
+
+// localStorage fallback for session persistence
+// Ez a megoldás biztosítja, hogy az oldal újbetöltése után is bejelentkezve maradjon a felhasználó,
+// akkor is, ha a session cookie valamilyen oka miatt nem érkezne meg
+const LOCAL_STORAGE_USER_KEY = "__user_session__";
+const LOCAL_STORAGE_CLASSES_KEY = "__classes_cache__";
+
+const saveUserSession = (user) => {
+  if (user) {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(user));
+    } catch (err) {
+      console.warn("localStorage nem elérhető", err);
+    }
+  }
+};
+
+const loadUserSession = () => {
+  try {
+    const stored = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch (err) {
+    console.warn("localStorage olvasás hiba", err);
+    return null;
+  }
+};
+
+const clearUserSession = () => {
+  try {
+    localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+  } catch (err) {
+    console.warn("localStorage törlés hiba", err);
+  }
+};
+
+// Órarend cache-elés az offline/network hiba fallback-hez
+const saveClassesCache = (classes) => {
+  if (Array.isArray(classes) && classes.length > 0) {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_CLASSES_KEY, JSON.stringify(classes));
+    } catch (err) {
+      console.warn("Classes cache hiba", err);
+    }
+  }
+};
+
+const loadClassesCache = () => {
+  try {
+    const stored = localStorage.getItem(LOCAL_STORAGE_CLASSES_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch (err) {
+    console.warn("Classes cache olvasás hiba", err);
+    return null;
+  }
+};
+
+const clearClassesCache = () => {
+  try {
+    localStorage.removeItem(LOCAL_STORAGE_CLASSES_KEY);
+  } catch (err) {
+    console.warn("Classes cache törlés hiba", err);
+  }
 };
 
 const isFridayDisabledClass = (startsAtIso) => {
@@ -501,6 +565,8 @@ const renderCalendarGrid = (classes) => {
 
 const renderClasses = (classes) => {
   lastClasses = classes;
+  // Órarend cache-elés fallback-hez
+  saveClassesCache(classes);
   updateWeekTitle();
   renderCalendarGrid(classes);
 };
@@ -635,7 +701,7 @@ const renderAdminClasses = (classes) => {
 
       addGuestButton?.addEventListener("click", () => {
         if (isFull) {
-          setCardStatus(statusText, "Az óra betelt (max 6 fő).");
+          setCardStatus(statusText, "Az óra betelt (max 10 fő).");
           return;
         }
         const name = nameInput ? nameInput.value.trim() : "";
@@ -653,7 +719,7 @@ const renderAdminClasses = (classes) => {
 
       addRegisteredButton?.addEventListener("click", () => {
         if (isFull) {
-          setCardStatus(statusText, "Az óra betelt (max 6 fő).");
+          setCardStatus(statusText, "Az óra betelt (max 10 fő).");
           return;
         }
         const userEmail = registeredSelect ? registeredSelect.value.trim() : "";
@@ -993,6 +1059,18 @@ const openSignup = (item) => {
 
 const loadClasses = async () => {
   const response = await apiFetch("/api/classes");
+  if (!response.ok) {
+    // Network vagy API hiba: próbáljunk cache-ből
+    const cachedClasses = loadClassesCache();
+    if (cachedClasses && cachedClasses.length > 0) {
+      console.warn("API hiba, cache-ből betöltve az órarendet");
+      renderClasses(cachedClasses);
+      return;
+    }
+    // Ha cache sincs, akkor üres órarend
+    renderClasses([]);
+    return;
+  }
   const data = await response.json();
   renderClasses(data);
 };
@@ -1001,6 +1079,14 @@ const loadMySignups = async () => {
   if (!currentUser) {
     renderMySignups([]);
     renderSignupsMenu();
+    // Fallback: ha nincsen órarend, cache-ből tölt vagy üres mutat
+    if (lastClasses.length === 0) {
+      const cachedClasses = loadClassesCache();
+      if (cachedClasses && cachedClasses.length > 0) {
+        renderClasses(cachedClasses);
+        return;
+      }
+    }
     renderClasses(lastClasses);
     return;
   }
@@ -1008,12 +1094,28 @@ const loadMySignups = async () => {
   if (!response.ok) {
     renderMySignups([]);
     renderSignupsMenu();
+    // Fallback: ha nincsen órarend, cache-ből tölt vagy üres mutat
+    if (lastClasses.length === 0) {
+      const cachedClasses = loadClassesCache();
+      if (cachedClasses && cachedClasses.length > 0) {
+        renderClasses(cachedClasses);
+        return;
+      }
+    }
     renderClasses(lastClasses);
     return;
   }
   const data = await response.json();
   renderMySignups(data);
   renderSignupsMenu();
+  // Fallback: ha nincsen órarend, cache-ből tölt vagy üres mutat
+  if (lastClasses.length === 0) {
+    const cachedClasses = loadClassesCache();
+    if (cachedClasses && cachedClasses.length > 0) {
+      renderClasses(cachedClasses);
+      return;
+    }
+  }
   renderClasses(lastClasses);
 };
 
@@ -1396,7 +1498,17 @@ const loadUser = async () => {
   try {
     const response = await apiFetch("/api/auth/me");
     if (!response.ok) {
+      // Fallback: próbáljuk meg a localStorage-ből betölteni
+      const cachedUser = loadUserSession();
+      if (cachedUser) {
+        currentUser = cachedUser;
+        updateUserUI();
+        await loadMySignups();
+        return;
+      }
+      // Ha nincs mentett session sem, akkor nincs bejelentkezve
       currentUser = null;
+      clearUserSession();
       updateUserUI();
       renderMySignups([]);
       renderSignupsMenu();
@@ -1404,10 +1516,22 @@ const loadUser = async () => {
     }
     const data = await response.json();
     currentUser = data.user;
+    // Mentsük el a localStorage-ba is az oldal újbetöltéskor való gyors betöltéshez
+    saveUserSession(currentUser);
     updateUserUI();
     await loadMySignups();
   } catch (err) {
+    // Network error vagy közvetlen hiba: próbáljuk meg a localStorage-ből betölteni
+    const cachedUser = loadUserSession();
+    if (cachedUser) {
+      currentUser = cachedUser;
+      updateUserUI();
+      await loadMySignups();
+      return;
+    }
+    // Nincs olyan, ha sem a session sem a localStorage nem elérhető
     currentUser = null;
+    clearUserSession();
     updateUserUI();
     renderMySignups([]);
     renderSignupsMenu();
@@ -1415,27 +1539,49 @@ const loadUser = async () => {
 };
 
 const updateUserUI = () => {
+  const userAuthSection = document.getElementById("user-auth-section");
+  const userLogoutSection = document.getElementById("user-logout-section");
+  const userLogoutName = document.getElementById("user-logout-name");
+
   if (currentUser) {
     userPill.hidden = false;
     userPill.textContent = `Bejelentkezve: ${currentUser.fullName || currentUser.name || currentUser.email}`;
     userPill.classList.add("is-logged-in");
-    openUser.textContent = "Kijelentkezés";
+    openUser.textContent = "Profil";
     if (openSignups) {
       openSignups.hidden = false;
     }
     if (openPass) {
       openPass.hidden = false;
     }
+    // Modal-ban: kijelentkezés szekció mutatása
+    if (userAuthSection) {
+      userAuthSection.hidden = true;
+    }
+    if (userLogoutSection) {
+      userLogoutSection.hidden = false;
+      if (userLogoutName) {
+        userLogoutName.textContent =
+          currentUser.fullName || currentUser.name || currentUser.email;
+      }
+    }
   } else {
     userPill.hidden = true;
     userPill.textContent = "";
     userPill.classList.remove("is-logged-in");
-    openUser.textContent = "Bejelentkezés";
+    openUser.textContent = "Belépés / Regisztráció";
     if (openSignups) {
       openSignups.hidden = true;
     }
     if (openPass) {
       openPass.hidden = true;
+    }
+    // Modal-ban: bejelentkezési szekció mutatása
+    if (userAuthSection) {
+      userAuthSection.hidden = false;
+    }
+    if (userLogoutSection) {
+      userLogoutSection.hidden = true;
     }
   }
   signupName.disabled = true;
@@ -1561,6 +1707,8 @@ userLoginForm.addEventListener("submit", async (event) => {
 
   const data = await response.json();
   currentUser = data.user;
+  // Mentsük el a localStorage-ba a gyors betöltéshez az oldal újbetöltésekor
+  saveUserSession(currentUser);
   updateUserUI();
   userLoginMessage.textContent =
     authMode === "register" ? "Sikeres regisztráció." : "Sikeres belépés.";
@@ -1741,6 +1889,31 @@ testTelegramButton?.addEventListener("click", async () => {
 
 closeSignup.addEventListener("click", () => closeModal(signupModal));
 closeUser.addEventListener("click", () => closeModal(userModal));
+
+userLogoutButton?.addEventListener("click", async () => {
+  const response = await apiFetch("/api/auth/logout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  // Kijelentkezés akkor is végeig megy, ha a szerver nem válaszol
+  currentUser = null;
+  clearUserSession();
+  // Kijelentkezéskor az órarend cache-t is törlük
+  clearClassesCache();
+  updateUserUI();
+  closeModal(userModal);
+
+  if (!response.ok) {
+    console.warn("Logout hibás válasz, de a kliens session eltávolítva");
+  }
+
+  // Oldal felfrissítése a tiszta state biztosításához
+  await loadClasses();
+  renderMySignups([]);
+  renderSignupsMenu();
+});
+
 closeAdmin.addEventListener("click", () => closeModal(adminModal));
 closeSignups?.addEventListener("click", () => closeModal(signupsModal));
 closePass?.addEventListener("click", () => closeModal(passModal));
@@ -1797,6 +1970,13 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("DOMContentLoaded", () => {
+  // Gyors betöltés cache-ből (ha elérhető) - így nem üres az oldal az API válaszig
+  const cachedClasses = loadClassesCache();
+  if (cachedClasses && cachedClasses.length > 0) {
+    renderClasses(cachedClasses);
+  }
+
+  // Számajó órarend az API-ból
   loadClasses();
   loadUser();
   setAuthMode("login");
@@ -1886,9 +2066,9 @@ const initEasterBanner = () => {
     // With eggs: March 30 - April 6
     // Without eggs: April 7 - April 30
     if ((month === 3 && day >= 30) || (month === 4 && day <= 6)) {
-      bannerTextEl.textContent = "🥚 Üdvözöllek! 🥚";
+      bannerTextEl.textContent = "🥚 Kellemes hétvégét! 🥚";
     } else {
-      bannerTextEl.textContent = "Üdvözöllek!";
+      bannerTextEl.textContent = "Kellemes hétvégét!";
     }
 
     // Show banner

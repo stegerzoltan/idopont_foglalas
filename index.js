@@ -39,6 +39,24 @@ webpush.setVapidDetails(
 
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+
+// Generate a cache-busting version string based on server startup time
+// This ensures that every deploy gets a new version number, forcing browsers to refresh cached assets
+const BUILD_VERSION = Date.now().toString(36).toUpperCase();
+
+// Middleware to serve index.html with dynamic version numbers
+app.get("/", (req, res) => {
+  let html = fs.readFileSync(
+    path.join(__dirname, "public", "index.html"),
+    "utf-8",
+  );
+  // Replace all occurrences of v=XXXXXXXX with current version
+  html = html.replace(/v=\d+/g, `v=${BUILD_VERSION}`);
+  res.setHeader("Cache-Control", "no-store");
+  res.type("html").send(html);
+});
+
+// Serve other static files with cache busting
 app.use(
   express.static(path.join(__dirname, "public"), {
     etag: false,
@@ -650,7 +668,7 @@ const TIME_SLOTS = [
   "19:00",
 ];
 
-const MAX_SIGNUPS = 6;
+const MAX_SIGNUPS = 10;
 
 const CLASS_DURATION_MINUTES = 60;
 const PASS_USE_BACKDATE_DAYS = 7;
