@@ -70,6 +70,9 @@ const passUseDate = document.getElementById("pass-use-date");
 const addPassUseButton = document.getElementById("add-pass-use");
 const passUsesAdmin = document.getElementById("pass-uses-admin");
 const passAdminStatus = document.getElementById("pass-admin-status");
+const adminArchiveToggle = document.getElementById("admin-archive-toggle");
+const adminArchiveWeeks = document.getElementById("admin-archive-weeks");
+const adminArchiveDetail = document.getElementById("admin-archive-detail");
 
 let currentUser = null;
 let lastClasses = [];
@@ -595,6 +598,124 @@ const setAdminNotificationsVisibility = (isOpen) => {
       ? "Értesítések elrejtése"
       : "Értesítések megnyitása";
   }
+};
+
+const setAdminArchiveVisibility = (isOpen) => {
+  if (adminArchiveWeeks) {
+    adminArchiveWeeks.hidden = !isOpen;
+  }
+  if (adminArchiveToggle) {
+    adminArchiveToggle.setAttribute("aria-expanded", String(isOpen));
+    adminArchiveToggle.textContent = isOpen
+      ? "Korábbi hetek elrejtése"
+      : "Korábbi hetek megnyitása";
+  }
+};
+
+const loadArchiveWeeks = async () => {
+  try {
+    const response = await apiFetch("/api/admin/archive/weeks");
+    if (!response.ok) {
+      adminArchiveWeeks.innerHTML = "<p>Hiba a korábbi hetek betöltésekor.</p>";
+      return;
+    }
+    const weeks = await response.json();
+    renderArchiveWeeks(weeks);
+  } catch (err) {
+    console.error("Archive weeks error:", err);
+    adminArchiveWeeks.innerHTML = "<p>Hiba a korábbi hetek betöltésekor.</p>";
+  }
+};
+
+const renderArchiveWeeks = (weeks) => {
+  adminArchiveWeeks.innerHTML = "";
+  if (!weeks || weeks.length === 0) {
+    adminArchiveWeeks.innerHTML = "<p>Nincs korábbi hét az archívumban.</p>";
+    return;
+  }
+
+  weeks.forEach((week) => {
+    const btn = document.createElement("button");
+    btn.className = "ghost";
+    btn.textContent = `${week.weekLabel} - ${week.classCount} óra, ${week.totalSignups} feliratkozás`;
+    btn.addEventListener("click", () => {
+      loadArchiveWeekDetail(week.weekDate);
+    });
+    adminArchiveWeeks.appendChild(btn);
+  });
+};
+
+const loadArchiveWeekDetail = async (weekDate) => {
+  adminArchiveDetail.innerHTML = "<p>Betöltés...</p>";
+  adminArchiveDetail.hidden = false;
+  try {
+    const response = await apiFetch(
+      `/api/admin/archive/week-classes/${weekDate}`,
+    );
+    if (!response.ok) {
+      adminArchiveDetail.innerHTML = "<p>Hiba az órarend betöltésekor.</p>";
+      return;
+    }
+    const classes = await response.json();
+    renderArchiveWeekClasses(classes, weekDate);
+  } catch (err) {
+    console.error("Archive week detail error:", err);
+    adminArchiveDetail.innerHTML = "<p>Hiba az órarend betöltésekor.</p>";
+  }
+};
+
+const renderArchiveWeekClasses = (classes, weekDate) => {
+  adminArchiveDetail.innerHTML = "";
+  if (!classes || classes.length === 0) {
+    adminArchiveDetail.innerHTML = "<p>Nincs óra erre a hétre.</p>";
+    return;
+  }
+
+  const title = document.createElement("h3");
+  title.textContent = `Archívum: ${formatDate(new Date(weekDate + "T00:00:00Z"))} heti órák`;
+  adminArchiveDetail.appendChild(title);
+
+  const downloadBtn = document.createElement("button");
+  downloadBtn.className = "primary";
+  downloadBtn.textContent = "📥 Letöltés PDF-ként";
+  downloadBtn.addEventListener("click", () => {
+    const link = document.createElement("a");
+    link.href = `/api/admin/archive/week-pdf/${weekDate}`;
+    link.download = `orarend_${weekDate}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  });
+  adminArchiveDetail.appendChild(downloadBtn);
+
+  const wrapper = document.createElement("div");
+  wrapper.style.marginTop = "20px";
+
+  classes.forEach((cls) => {
+    const card = document.createElement("div");
+    card.className = "card";
+    const signups = cls.signups || [];
+
+    card.innerHTML = `
+      <h4>${cls.title}</h4>
+      <div class="meta">
+        <span>${cls.coach ? `Edző: ${cls.coach}` : ""}</span>
+        <span>${formatDate(cls.startsAt)}</span>
+        <span>${signups.length}/${cls.capacity} fő</span>
+      </div>
+      ${cls.notes ? `<p>${cls.notes}</p>` : ""}
+      <div class="signups-list">
+        <strong>Feliratkozottak:</strong>
+        ${
+          signups.length > 0
+            ? `<ul>${signups.map((s) => `<li>${s.name} (${s.email})</li>`).join("")}</ul>`
+            : "<p>Nincs feliratkozás.</p>"
+        }
+      </div>
+    `;
+    wrapper.appendChild(card);
+  });
+  adminArchiveDetail.appendChild(wrapper);
 };
 
 const renderAdminClasses = (classes) => {
@@ -1861,6 +1982,15 @@ adminClassToggle?.addEventListener("click", () => {
 
 adminNotificationsToggle?.addEventListener("click", () => {
   setAdminNotificationsVisibility(!adminNotificationsOpen);
+});
+
+adminArchiveToggle?.addEventListener("click", async () => {
+  const isOpen = adminArchiveWeeks.hidden;
+  if (isOpen) {
+    adminArchiveWeeks.innerHTML = "<p>Betöltés...</p>";
+    await loadArchiveWeeks();
+  }
+  setAdminArchiveVisibility(isOpen);
 });
 
 enablePushButton?.addEventListener("click", () => {

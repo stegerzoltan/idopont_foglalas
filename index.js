@@ -9,6 +9,7 @@ const { Pool } = require("pg");
 const sqlite3 = require("sqlite3").verbose();
 const crypto = require("crypto");
 const webpush = require("web-push");
+const PDFDocument = require("pdfkit");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -164,6 +165,9 @@ const sessionOptions = {
   saveUninitialized: false,
   cookie: {
     sameSite: "lax",
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 nap
+    httpOnly: true, // Csak HTTP, JS nem éri el
+    secure: process.env.NODE_ENV === "production", // HTTPS-only prod-ban
   },
 };
 
@@ -520,6 +524,12 @@ const mapClassRow = (row) => ({
   notes: row.notes,
   isActive: row.is_active === 1 || row.is_active === true,
 });
+
+const formatWeekLabel = (date) => {
+  const options = { year: "numeric", month: "2-digit", day: "2-digit" };
+  const formatted = date.toLocaleDateString("hu-HU", options);
+  return `${formatted} (hét)`;
+};
 
 const createNotification = (type, message) => {
   const createdAt = new Date().toISOString();
@@ -2542,6 +2552,130 @@ app.post("/api/admin/signups/:id/cancel", requireAdmin, (req, res) => {
   );
 });
 
+// Archívum: PDF export egy adott hét órarendjéről
+app.get("/api/admin/archive/week-pdf/:weekDate", requireAdmin, (req, res) => {
+  const weekDate = req.params.weekDate; // YYYY-MM-DD format expected
+
+  db.all(
+    `SELECT c.*, (
+      SELECT COUNT(*) FROM signups s WHERE s.class_id = c.id AND s.status = 'confirmed'
+    ) AS confirmed_count
+    FROM classes c
+    WHERE DATE(c.starts_at) = ?
+    ORDER BY c.starts_at ASC`,
+    [weekDate],
+    (err, rows) => {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      if (!rows || rows.length === 0) {
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="orarend_${weekDate}.pdf"`,
+        );
+        const doc = new PDFDocument();
+        doc.pipe(res);
+        doc.fontSize(20).text(`Órarend: ${weekDate}`, { align: "center" });
+        doc.fontSize(12).text("Nincs óra erre a hétre.", { align: "center" });
+        doc.end();
+        return;
+      }
+
+      const classIds = rows.map((row) => row.id);
+      const placeholders = classIds.map(() => "?").join(",");
+      db.all(
+        `SELECT class_id, name, email, created_at
+         FROM signups
+         WHERE status = 'confirmed' AND class_id IN (${placeholders})
+         ORDER BY created_at ASC`,
+        classIds,
+        (signErr, signRows) => {
+          if (signErr) {
+            return res.status(500).json({ error: "Database error" });
+          }
+
+          const signupsByClass = new Map();
+          (signRows || []).forEach((row) => {
+            if (!signupsByClass.has(row.class_id)) {
+              signupsByClass.set(row.class_id, []);
+            }
+            signupsByClass.get(row.class_id).push({
+              name: row.name,
+              email: row.email,
+              createdAt: row.created_at,
+            });
+          });
+
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="orarend_${weekDate}.pdf"`,
+          );
+
+          const doc = new PDFDocument({
+            size: "A4",
+            margin: 40,
+          });
+          doc.pipe(res);
+
+          // Title
+          doc.fontSize(20).text(`Órarend: ${weekDate}`, { align: "center" });
+          doc.fontSize(12).text(`Összes feliratkozás: ${signRows.length}`, {
+            align: "center",
+          });
+          doc.moveDown();
+
+          // Classes
+          rows.forEach((row, idx) => {
+            const signups = signupsByClass.get(row.id) || [];
+            const startDate = new Date(row.starts_at);
+            const timeStr = startDate.toLocaleTimeString("hu-HU", {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+            const dateStr = startDate.toLocaleDateString("hu-HU");
+
+            doc
+              .fontSize(12)
+              .text(`${idx + 1}. ${row.title}`, { underline: true });
+            doc
+              .fontSize(10)
+              .text(`Idő: ${dateStr} ${timeStr}`)
+              .text(`Edző: ${row.coach || "N/A"}`)
+              .text(`Helyek: ${signups.length}/${row.capacity}`)
+              .text(`Helyszín: ${row.location || "N/A"}`);
+
+            if (row.notes) {
+              doc.text(`Megjegyzés: ${row.notes}`);
+            }
+
+            if (signups.length > 0) {
+              doc.fontSize(9).text("Feliratkozók:");
+              signups.forEach((sig) => {
+                doc.text(`  • ${sig.name} (${sig.email})`);
+              });
+            } else {
+              doc.fontSize(9).text("Nincsenek feliratkozások.");
+            }
+
+            doc.moveDown();
+          });
+
+          // Footer
+          doc
+            .fontSize(8)
+            .text(`Generálva: ${new Date().toLocaleString("hu-HU")}`, {
+              align: "center",
+            });
+
+          doc.end();
+        },
+      );
+    },
+  );
+});
+
 app.get("/api/admin/notifications", requireAdmin, (req, res) => {
   db.all(
     "SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20",
@@ -2554,6 +2688,108 @@ app.get("/api/admin/notifications", requireAdmin, (req, res) => {
     },
   );
 });
+
+// Archívum: Összes eltérő hét listázása
+app.get("/api/admin/archive/weeks", requireAdmin, (req, res) => {
+  db.all(
+    `SELECT DISTINCT 
+       DATE(c.starts_at) as week_date,
+       MIN(c.starts_at) as first_class,
+       MAX(c.starts_at) as last_class,
+       COUNT(DISTINCT c.id) as class_count,
+       (SELECT COUNT(*) FROM signups s WHERE s.class_id IN (
+         SELECT id FROM classes c2 WHERE DATE(c2.starts_at) = DATE(c.starts_at)
+       ) AND s.status = 'confirmed') as total_signups
+     FROM classes c
+     GROUP BY DATE(c.starts_at)
+     ORDER BY DATE(c.starts_at) DESC
+     LIMIT 12`,
+    [],
+    (err, rows) => {
+      if (err) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      const weeks = (rows || []).map((row) => {
+        const date = new Date(row.week_date);
+        const weekStart = new Date(date);
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // Monday
+        return {
+          weekStart: weekStart.toISOString().split("T")[0],
+          weekDate: row.week_date,
+          weekLabel: formatWeekLabel(new Date(row.week_date)),
+          classCount: row.class_count,
+          totalSignups: row.total_signups,
+        };
+      });
+      return res.json(weeks);
+    },
+  );
+});
+
+// Archívum: Egy adott hét összes órája és bejelentkezései
+app.get(
+  "/api/admin/archive/week-classes/:weekDate",
+  requireAdmin,
+  (req, res) => {
+    const weekDate = req.params.weekDate; // YYYY-MM-DD format expected
+
+    db.all(
+      `SELECT c.*, (
+      SELECT COUNT(*) FROM signups s WHERE s.class_id = c.id AND s.status = 'confirmed'
+    ) AS confirmed_count
+    FROM classes c
+    WHERE DATE(c.starts_at) = ?
+    ORDER BY c.starts_at ASC`,
+      [weekDate],
+      (err, rows) => {
+        if (err) {
+          return res.status(500).json({ error: "Database error" });
+        }
+        if (!rows || rows.length === 0) {
+          return res.json([]);
+        }
+
+        const classIds = rows.map((row) => row.id);
+        const placeholders = classIds.map(() => "?").join(",");
+        db.all(
+          `SELECT class_id, name, email, created_at
+         FROM signups
+         WHERE status = 'confirmed' AND class_id IN (${placeholders})
+         ORDER BY created_at ASC`,
+          classIds,
+          (signErr, signRows) => {
+            if (signErr) {
+              return res.status(500).json({ error: "Database error" });
+            }
+
+            const signupsByClass = new Map();
+            (signRows || []).forEach((row) => {
+              if (!signupsByClass.has(row.class_id)) {
+                signupsByClass.set(row.class_id, []);
+              }
+              signupsByClass.get(row.class_id).push({
+                name: row.name,
+                email: row.email,
+                createdAt: row.created_at,
+              });
+            });
+
+            const payload = rows.map((row) => {
+              const signups = signupsByClass.get(row.id) || [];
+              return {
+                ...mapClassRow(row),
+                confirmedCount: row.confirmed_count,
+                signups: signups,
+                spotsLeft: Math.max(0, row.capacity - row.confirmed_count),
+              };
+            });
+            return res.json(payload);
+          },
+        );
+      },
+    );
+  },
+);
 
 app.get("/health", (req, res) => {
   res.json({ ok: true });
