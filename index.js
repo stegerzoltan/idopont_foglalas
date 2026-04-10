@@ -1416,9 +1416,15 @@ app.post("/api/admin/login", (req, res) => {
   const password = String(req.body.password || "").trim();
   if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
     req.session.isAdmin = true;
-    return res.json({ ok: true });
+    req.session.save((saveErr) => {
+      if (saveErr) {
+        return res.status(500).json({ error: "Session save error" });
+      }
+      return res.json({ ok: true });
+    });
+  } else {
+    return res.status(401).json({ error: "Invalid credentials" });
   }
-  return res.status(401).json({ error: "Invalid credentials" });
 });
 
 app.post("/api/admin/logout", (req, res) => {
