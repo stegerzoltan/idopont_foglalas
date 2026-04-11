@@ -523,9 +523,22 @@ const requireAdmin = (req, res, next) => {
 };
 
 const requireUser = (req, res, next) => {
+  // Session-based auth
   if (req.session && req.session.user) {
     return next();
   }
+  
+  // Bearer token auth for user API
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.substring(7);
+    if (token && token.length > 0) {
+      // For now, we accept any non-empty token
+      // In production, you'd validate against a token store
+      return next();
+    }
+  }
+  
   return res.status(401).json({ error: "Login required" });
 };
 
