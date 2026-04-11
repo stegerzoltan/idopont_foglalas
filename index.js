@@ -1429,7 +1429,7 @@ app.post("/api/admin/login", (req, res) => {
       if (saveErr) {
         return res.status(500).json({ error: "Session save error" });
       }
-      return res.json({ ok: true });
+      return res.json({ ok: true, isAdmin: true });
     });
   } else {
     return res.status(401).json({ error: "Invalid credentials" });

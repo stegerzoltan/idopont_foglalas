@@ -121,8 +121,34 @@ const apiFetch = (url, options = {}) => {
   });
 };
 
-// localStorage fallback for session persistence
-// Ez a megoldás biztosítja, hogy az oldal újbetöltése után is bejelentkezve maradjon a felhasználó,
+// localStorage fallback for admin session persistence
+const LOCAL_STORAGE_ADMIN_KEY = "__admin_session__";
+
+const saveAdminSession = () => {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_ADMIN_KEY, JSON.stringify({ isAdmin: true }));
+  } catch (err) {
+    console.warn("localStorage nem elérhető", err);
+  }
+};
+
+const loadAdminSession = () => {
+  try {
+    const stored = localStorage.getItem(LOCAL_STORAGE_ADMIN_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch (err) {
+    console.warn("localStorage olvasás hiba", err);
+    return null;
+  }
+};
+
+const clearAdminSession = () => {
+  try {
+    localStorage.removeItem(LOCAL_STORAGE_ADMIN_KEY);
+  } catch (err) {
+    console.warn("localStorage törlés hiba", err);
+  }
+};
 // akkor is, ha a session cookie valamilyen oka miatt nem érkezne meg
 const LOCAL_STORAGE_USER_KEY = "__user_session__";
 const LOCAL_STORAGE_CLASSES_KEY = "__classes_cache__";
@@ -1249,6 +1275,21 @@ const loadAdminData = async () => {
     ]);
 
   if (classesResponse.status === 401) {
+    // Fallback: próbáljuk meg a localStorage-ből betölteni
+    const cachedAdmin = loadAdminSession();
+    if (!cachedAdmin) {
+      adminPanel.hidden = true;
+      adminLoginForm.parentElement.hidden = false;
+      if (adminPill) {
+        adminPill.hidden = true;
+      }
+      return;
+    }
+    // Ha localStorage-ből van admin session, de API 401, talán új bejelentkezésre van szükség
+    // Azonban ezt követően az API-nak működnie kellene, szóval ezt nem tekintjük sikeres állapotnak
+  }
+
+  if (!classesResponse.ok || !notificationsResponse.ok || !usersResponse.ok) {
     adminPanel.hidden = true;
     adminLoginForm.parentElement.hidden = false;
     if (adminPill) {
@@ -1857,7 +1898,14 @@ adminLoginForm.addEventListener("submit", async (event) => {
     return;
   }
 
+  const data = await response.json();
   adminLoginMessage.textContent = "Sikeres belépés.";
+  
+  // Mentsük el a localStorage-ba az admin session-t
+  if (data.isAdmin) {
+    saveAdminSession();
+  }
+  
   await loadAdminData();
   if (adminPill) {
     adminPill.hidden = false;
@@ -1866,6 +1914,7 @@ adminLoginForm.addEventListener("submit", async (event) => {
 
 adminLogout.addEventListener("click", async () => {
   await apiFetch("/api/admin/logout", { method: "POST" });
+  clearAdminSession();
   adminPanel.hidden = true;
   adminLoginForm.parentElement.hidden = false;
   if (adminPill) {
