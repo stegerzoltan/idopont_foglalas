@@ -443,6 +443,51 @@ body.modal-open .quick-menu {
   .pass-panel button {
     flex: 1 1 100%;
   }
+
+  /* Admin users table: card layout on mobile */
+  .admin-table thead {
+    display: none;
+  }
+
+  .admin-table tr {
+    display: flex;
+    flex-direction: column;
+    background: var(--card-warm);
+    border-radius: 14px;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    border: 1px solid rgba(43, 31, 23, 0.1);
+    gap: 0.4rem;
+  }
+
+  .admin-table td {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    border-bottom: none;
+    padding: 0.2rem 0;
+  }
+
+  .admin-table td::before {
+    content: attr(data-label);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06rem;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  .admin-table td.form-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .admin-table td input {
+    min-width: 0;
+  }
 }
 
 .calendar-header {
@@ -934,8 +979,25 @@ input, textarea {
   border-bottom: none;
 }
 
+.admin-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 14px;
+}
+
 .admin-table td:nth-child(2) {
   word-break: break-all;
+}
+
+.admin-table td input {
+  min-width: 100px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.admin-table td.form-actions {
+  white-space: nowrap;
+  min-width: 180px;
 }
 
 @keyframes fadeIn {

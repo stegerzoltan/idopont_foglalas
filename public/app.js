@@ -1406,12 +1406,12 @@ const renderAdminUsersPass = (users) => {
         : "Nincs bérlet";
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td><input type="text" data-role="full-name" /></td>
-      <td><input type="email" data-role="email" /></td>
-      <td><input type="text" data-role="birth-date" placeholder="YYYY-MM-DD" /></td>
-      <td><input type="tel" data-role="phone" /></td>
-      <td>${passLabel}</td>
-      <td>${createdLabel}</td>
+      <td data-label="Név"><input type="text" data-role="full-name" /></td>
+      <td data-label="Email"><input type="email" data-role="email" /></td>
+      <td data-label="Születési dátum"><input type="text" data-role="birth-date" placeholder="YYYY-MM-DD" /></td>
+      <td data-label="Telefonszám"><input type="tel" data-role="phone" /></td>
+      <td data-label="Bérlet">${passLabel}</td>
+      <td data-label="Regisztráció">${createdLabel}</td>
       <td class="form-actions">
         <button class="primary" data-action="save-user">Mentés</button>
         <button class="ghost" data-action="edit-password">Jelszó</button>
@@ -1471,7 +1471,10 @@ const renderAdminUsersPass = (users) => {
     });
     tbody.appendChild(row);
   });
-  adminUsersPass.appendChild(table);
+  const wrap = document.createElement("div");
+  wrap.className = "admin-table-wrap";
+  wrap.appendChild(table);
+  adminUsersPass.appendChild(wrap);
 };
 
 const updateAdminUser = async (currentEmail, payload) => {
