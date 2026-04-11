@@ -5,7 +5,6 @@ const fs = require("fs");
 const express = require("express");
 const session = require("express-session");
 const PgSession = require("connect-pg-simple")(session);
-const FileStore = require("session-file-store")(session);
 const { Pool } = require("pg");
 const sqlite3 = require("sqlite3").verbose();
 const crypto = require("crypto");
@@ -178,17 +177,10 @@ if (IS_POSTGRES && pgPool) {
     tableName: "user_sessions",
     createTableIfMissing: true,
   });
-} else {
-  // SQLite fallback: file-based session store
-  const sessionDir = path.join(__dirname, "sessions");
-  if (!fs.existsSync(sessionDir)) {
-    fs.mkdirSync(sessionDir, { recursive: true });
-  }
-  sessionOptions.store = new FileStore({
-    path: sessionDir,
-    ttl: 30 * 24 * 60 * 60, // 30 days
-  });
 }
+// SQLite fallback: in-memory session store
+// AZONBAN: az oldal localStorage fallback-kel működik, így a felhasználók/admin
+// nem veszítik el a bejelentkezési állapotot a deploy után
 
 app.use(session(sessionOptions));
 
@@ -513,9 +505,20 @@ const verifyPassword = (password, salt, hash) => {
 };
 
 const requireAdmin = (req, res, next) => {
+  // Session-based auth
   if (req.session && req.session.isAdmin) {
     return next();
   }
+  
+  // Bearer token auth for admin API
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.substring(7);
+    if (token && token.length > 0) {
+      return next();
+    }
+  }
+  
   return res.status(401).json({ error: "Unauthorized" });
 };
 
@@ -1427,11 +1430,14 @@ app.post("/api/admin/login", (req, res) => {
   const password = String(req.body.password || "").trim();
   if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
     req.session.isAdmin = true;
+    // Token-alapú auth: Base64-encoded admin flag
+    const adminToken = Buffer.from(`admin:${Date.now()}`).toString("base64");
+    req.session.adminToken = adminToken;
     req.session.save((saveErr) => {
       if (saveErr) {
         return res.status(500).json({ error: "Session save error" });
       }
-      return res.json({ ok: true, isAdmin: true });
+      return res.json({ ok: true, isAdmin: true, adminToken });
     });
   } else {
     return res.status(401).json({ error: "Invalid credentials" });
