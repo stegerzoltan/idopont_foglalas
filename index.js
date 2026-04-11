@@ -5,6 +5,7 @@ const fs = require("fs");
 const express = require("express");
 const session = require("express-session");
 const PgSession = require("connect-pg-simple")(session);
+const SQLiteStore = require("connect-sqlite3")(session);
 const { Pool } = require("pg");
 const sqlite3 = require("sqlite3").verbose();
 const crypto = require("crypto");
@@ -175,15 +176,28 @@ const sessionOptions = {
 };
 
 if (IS_POSTGRES && pgPool) {
+  // PostgreSQL session store - tartós, deploy-ok között is megmarad
   sessionOptions.store = new PgSession({
     pool: pgPool,
     tableName: "user_sessions",
     createTableIfMissing: true,
   });
+  console.log("Session store: PostgreSQL (persistent across deploys)");
+} else {
+  // SQLite fájlalapú session store - túléli a restart/sleep-et, de deploy törli
+  // Render-en tartós session-hoz állítsd be a DATABASE_URL env változót!
+  const sessionDbPath = process.env.DB_PATH
+    ? path.dirname(process.env.DB_PATH)
+    : __dirname;
+  sessionOptions.store = new SQLiteStore({
+    db: "sessions.db",
+    dir: sessionDbPath,
+    table: "user_sessions",
+  });
+  console.warn(
+    "Session store: SQLite (sessions lost on Render deploy). Set DATABASE_URL for persistent sessions.",
+  );
 }
-// SQLite fallback: in-memory session store
-// AZONBAN: az oldal localStorage fallback-kel működik, így a felhasználók/admin
-// nem veszítik el a bejelentkezési állapotot a deploy után
 
 app.use(session(sessionOptions));
 
