@@ -795,7 +795,7 @@ body.modal-open .quick-menu {
 .admin-page {
   min-height: calc(100vh - 80px);
   padding: 2rem 5vw;
-  background: var(--bg-alt);
+  background: var(--bg);
   animation: fadeIn 0.2s ease;
 }
 
