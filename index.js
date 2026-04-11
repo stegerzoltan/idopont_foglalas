@@ -41,6 +41,9 @@ webpush.setVapidDetails(
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
+// Trust reverse proxy (Render, Heroku, etc.) so that secure cookies work over HTTPS
+app.set("trust proxy", 1);
+
 // Generate a cache-busting version string based on server startup time
 // This ensures that every deploy gets a new version number, forcing browsers to refresh cached assets
 const BUILD_VERSION = Date.now().toString(36).toUpperCase();

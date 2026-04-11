@@ -1665,15 +1665,8 @@ const loadUser = async () => {
   try {
     const response = await apiFetch("/api/auth/me");
     if (!response.ok) {
-      // Fallback: próbáljuk meg a localStorage-ből betölteni
-      const cachedUser = loadUserSession();
-      if (cachedUser) {
-        currentUser = cachedUser;
-        updateUserUI();
-        await loadMySignups();
-        return;
-      }
-      // Ha nincs mentett session sem, akkor nincs bejelentkezve
+      // Szerver session lejárt vagy érvénytelen (401/4xx) – töröljük a cache-t,
+      // ne mutassuk bejelentkezettnek a felhasználót, mert az API hívások meghiúsulnának
       currentUser = null;
       clearUserSession();
       updateUserUI();
@@ -1688,7 +1681,7 @@ const loadUser = async () => {
     updateUserUI();
     await loadMySignups();
   } catch (err) {
-    // Network error vagy közvetlen hiba: próbáljuk meg a localStorage-ből betölteni
+    // Csak hálózati hiba esetén (offline mód) használjuk a localStorage cache-t
     const cachedUser = loadUserSession();
     if (cachedUser) {
       currentUser = cachedUser;
@@ -1696,9 +1689,7 @@ const loadUser = async () => {
       await loadMySignups();
       return;
     }
-    // Nincs olyan, ha sem a session sem a localStorage nem elérhető
     currentUser = null;
-    clearUserSession();
     updateUserUI();
     renderMySignups([]);
     renderSignupsMenu();
