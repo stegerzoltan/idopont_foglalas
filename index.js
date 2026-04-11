@@ -509,7 +509,7 @@ const requireAdmin = (req, res, next) => {
   if (req.session && req.session.isAdmin) {
     return next();
   }
-  
+
   // Bearer token auth for admin API
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith("Bearer ")) {
@@ -518,7 +518,7 @@ const requireAdmin = (req, res, next) => {
       return next();
     }
   }
-  
+
   return res.status(401).json({ error: "Unauthorized" });
 };
 
@@ -1016,12 +1016,16 @@ app.post("/api/auth/register", (req, res) => {
         }
         return res.status(500).json({ error: "Database error" });
       }
-      req.session.user = { fullName, email, birthDate, phone };
+      const user = { fullName, email, birthDate, phone };
+      req.session.user = user;
+      // User token for API auth
+      const userToken = Buffer.from(`user:${email}:${Date.now()}`).toString("base64");
+      req.session.userToken = userToken;
       req.session.save((saveErr) => {
         if (saveErr) {
           return res.status(500).json({ error: "Session save error" });
         }
-        return res.json({ ok: true, user: req.session.user });
+        return res.json({ ok: true, user, userToken });
       });
     },
   );
@@ -1054,17 +1058,21 @@ app.post("/api/auth/login", (req, res) => {
             if (updateErr) {
               return res.status(500).json({ error: "Database error" });
             }
-            req.session.user = {
+            const user = {
               fullName: row.full_name,
               email: row.email,
               birthDate: row.birth_date,
               phone: row.phone,
             };
+            req.session.user = user;
+            // User token for API auth
+            const userToken = Buffer.from(`user:${email}:${Date.now()}`).toString("base64");
+            req.session.userToken = userToken;
             req.session.save((saveErr) => {
               if (saveErr) {
                 return res.status(500).json({ error: "Session save error" });
               }
-              return res.json({ ok: true, user: req.session.user });
+              return res.json({ ok: true, user, userToken });
             });
           },
         );
@@ -1073,17 +1081,21 @@ app.post("/api/auth/login", (req, res) => {
       if (!verifyPassword(password, row.password_salt, row.password_hash)) {
         return res.status(401).json({ error: "Invalid password" });
       }
-      req.session.user = {
+      const user = {
         fullName: row.full_name,
         email: row.email,
         birthDate: row.birth_date,
         phone: row.phone,
       };
+      req.session.user = user;
+      // User token for API auth
+      const userToken = Buffer.from(`user:${email}:${Date.now()}`).toString("base64");
+      req.session.userToken = userToken;
       req.session.save((saveErr) => {
         if (saveErr) {
           return res.status(500).json({ error: "Session save error" });
         }
-        return res.json({ ok: true, user: req.session.user });
+        return res.json({ ok: true, user, userToken });
       });
     },
   );

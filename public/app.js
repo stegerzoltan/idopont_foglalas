@@ -136,18 +136,50 @@ const clearAdminToken = () => {
   }
 };
 
+// User token storage for API auth
+const LOCAL_STORAGE_USER_TOKEN_KEY = "__user_token__";
+
+const saveUserToken = (token) => {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_USER_TOKEN_KEY, token);
+  } catch (err) {
+    console.warn("localStorage nem elérhető", err);
+  }
+};
+
+const getUserToken = () => {
+  try {
+    return localStorage.getItem(LOCAL_STORAGE_USER_TOKEN_KEY);
+  } catch (err) {
+    console.warn("localStorage olvasás hiba", err);
+    return null;
+  }
+};
+
+const clearUserToken = () => {
+  try {
+    localStorage.removeItem(LOCAL_STORAGE_USER_TOKEN_KEY);
+  } catch (err) {
+    console.warn("localStorage törlés hiba", err);
+  }
+};
+
 // Helper function for API calls that maintains session cookies
 const apiFetch = (url, options = {}) => {
   const headers = {
     "Content-Type": "application/json",
     ...options.headers,
   };
-  
+
   // Admin token hozzáadása az admin API hívásokhoz
   if (url.includes("/api/admin") && getAdminToken()) {
     headers["Authorization"] = `Bearer ${getAdminToken()}`;
   }
-  
+  // User token hozzáadása az összes többi API híváshoz (ha van user token)
+  else if (getUserToken()) {
+    headers["Authorization"] = `Bearer ${getUserToken()}`;
+  }
+
   return fetch(url, {
     credentials: "same-origin",
     ...options,
@@ -1908,6 +1940,10 @@ userLoginForm.addEventListener("submit", async (event) => {
   currentUser = data.user;
   // Mentsük el a localStorage-ba a gyors betöltéshez az oldal újbetöltésekor
   saveUserSession(currentUser);
+  // Mentsük el az user token-t localStorage-ba
+  if (data.userToken) {
+    saveUserToken(data.userToken);
+  }
   updateUserUI();
   userLoginMessage.textContent =
     authMode === "register" ? "Sikeres regisztráció." : "Sikeres belépés.";
