@@ -393,6 +393,52 @@ body.modal-open .quick-menu {
     transform-origin: top left;
     width: calc(100% / 0.68);
   }
+
+  /* Admin panel mobil optimalizáció */
+  .modal-content.large {
+    width: 100%;
+    max-height: 95vh;
+  }
+
+  .admin-panel .form-actions,
+  .admin-panel .class-form {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .admin-panel .form-actions input,
+  .admin-panel .form-actions button,
+  .admin-panel .form-actions select,
+  .admin-panel .class-form input,
+  .admin-panel .class-form select {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  /* Panel header gombok horizontálisan maradnak */
+  .admin-panel .panel-header .form-actions {
+    flex-wrap: nowrap;
+  }
+
+  .admin-panel .panel-header .form-actions button {
+    flex: 1 1 auto;
+    min-width: auto;
+    font-size: 0.85rem;
+    padding: 0.4rem 0.75rem;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pass-panel input,
+  .pass-panel select {
+    flex: 1 1 100%;
+  }
+
+  .pass-panel button {
+    flex: 1 1 100%;
+  }
 }
 
 .calendar-header {
@@ -645,6 +691,7 @@ body.modal-open .quick-menu {
   box-shadow: 0 22px 40px rgba(43, 31, 23, 0.18);
   max-height: 90vh;
   overflow-y: auto;
+  overflow-x: hidden;
   animation: scaleIn 0.25s ease;
 }
 
@@ -732,9 +779,19 @@ input, textarea {
 }
 
 .admin-shell {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 1.5rem;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.panel-header {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(27, 42, 50, 0.08);
 }
 
 .class-form {

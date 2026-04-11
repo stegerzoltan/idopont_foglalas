@@ -2697,39 +2697,43 @@ app.get("/api/admin/notifications", requireAdmin, (req, res) => {
 
 // Archívum: Összes eltérő hét listázása
 app.get("/api/admin/archive/weeks", requireAdmin, (req, res) => {
-  db.all(
-    `SELECT DISTINCT 
-       DATE(c.starts_at) as week_date,
-       MIN(c.starts_at) as first_class,
-       MAX(c.starts_at) as last_class,
-       COUNT(DISTINCT c.id) as class_count,
-       (SELECT COUNT(*) FROM signups s WHERE s.class_id IN (
-         SELECT id FROM classes c2 WHERE DATE(c2.starts_at) = DATE(c.starts_at)
-       ) AND s.status = 'confirmed') as total_signups
-     FROM classes c
-     GROUP BY DATE(c.starts_at)
-     ORDER BY DATE(c.starts_at) DESC
-     LIMIT 12`,
-    [],
-    (err, rows) => {
-      if (err) {
-        return res.status(500).json({ error: "Database error" });
-      }
-      const weeks = (rows || []).map((row) => {
-        const date = new Date(row.week_date);
-        const weekStart = new Date(date);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // Monday
-        return {
-          weekStart: weekStart.toISOString().split("T")[0],
-          weekDate: row.week_date,
-          weekLabel: formatWeekLabel(new Date(row.week_date)),
-          classCount: row.class_count,
-          totalSignups: row.total_signups,
-        };
-      });
-      return res.json(weeks);
-    },
-  );
+  const sql = IS_POSTGRES
+    ? `SELECT DISTINCT 
+         DATE_TRUNC('week', c.starts_at)::date as week_start,
+         COUNT(DISTINCT c.id) as class_count,
+         COUNT(DISTINCT CASE WHEN s.status = 'confirmed' THEN s.id END) as total_signups,
+         MIN(c.starts_at) as first_class
+       FROM classes c
+       LEFT JOIN signups s ON s.class_id = c.id
+       GROUP BY DATE_TRUNC('week', c.starts_at)::date
+       ORDER BY DATE_TRUNC('week', c.starts_at) DESC
+       LIMIT 12`
+    : `SELECT DISTINCT 
+         DATE(c.starts_at, 'weekday 1') as week_start,
+         COUNT(DISTINCT c.id) as class_count,
+         COUNT(DISTINCT CASE WHEN s.status = 'confirmed' THEN s.id END) as total_signups,
+         MIN(c.starts_at) as first_class
+       FROM classes c
+       LEFT JOIN signups s ON s.class_id = c.id
+       GROUP BY DATE(c.starts_at, 'weekday 1')
+       ORDER BY DATE(c.starts_at, 'weekday 1') DESC
+       LIMIT 12`;
+
+  db.all(sql, [], (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: "Database error" });
+    }
+    const weeks = (rows || []).map((row) => {
+      const weekDate = row.week_start;
+      return {
+        weekDate: weekDate,
+        weekLabel: formatWeekLabel(new Date(weekDate + "T00:00:00Z")),
+        classCount: row.class_count,
+        totalSignups: row.total_signups,
+      };
+    });
+    return res.json(weeks);
+  });
 });
 
 // Archívum: Egy adott hét összes órája és bejelentkezései
@@ -2739,14 +2743,28 @@ app.get(
   (req, res) => {
     const weekDate = req.params.weekDate; // YYYY-MM-DD format expected
 
+    // Calculate week start (Monday) and end (Sunday)
+    const weekStartDate = new Date(weekDate + "T00:00:00Z");
+    // Ensure we're calculating from Monday
+    const dayOfWeek = weekStartDate.getUTCDay();
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    weekStartDate.setUTCDate(weekStartDate.getUTCDate() - daysToMonday);
+
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setUTCDate(weekEndDate.getUTCDate() + 6);
+    weekEndDate.setUTCHours(23, 59, 59, 999);
+
+    const weekStart = weekStartDate.toISOString();
+    const weekEnd = weekEndDate.toISOString();
+
     db.all(
       `SELECT c.*, (
-      SELECT COUNT(*) FROM signups s WHERE s.class_id = c.id AND s.status = 'confirmed'
-    ) AS confirmed_count
-    FROM classes c
-    WHERE DATE(c.starts_at) = ?
-    ORDER BY c.starts_at ASC`,
-      [weekDate],
+        SELECT COUNT(*) FROM signups s WHERE s.class_id = c.id AND s.status = 'confirmed'
+      ) AS confirmed_count
+      FROM classes c
+      WHERE c.starts_at >= ? AND c.starts_at <= ?
+      ORDER BY c.starts_at ASC`,
+      [weekStart, weekEnd],
       (err, rows) => {
         if (err) {
           return res.status(500).json({ error: "Database error" });
@@ -2759,9 +2777,9 @@ app.get(
         const placeholders = classIds.map(() => "?").join(",");
         db.all(
           `SELECT class_id, name, email, created_at
-         FROM signups
-         WHERE status = 'confirmed' AND class_id IN (${placeholders})
-         ORDER BY created_at ASC`,
+           FROM signups
+           WHERE status = 'confirmed' AND class_id IN (${placeholders})
+           ORDER BY created_at ASC`,
           classIds,
           (signErr, signRows) => {
             if (signErr) {
