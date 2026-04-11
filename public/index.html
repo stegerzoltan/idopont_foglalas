@@ -132,95 +132,89 @@
     </div>
   </div>
 
-  <div class="modal" id="admin-modal" aria-hidden="true">
-    <div class="modal-content large">
-      <button class="icon-button" id="close-admin" aria-label="Bezárás">x</button>
-      <div class="admin-shell">
-        <div class="admin-login">
-          <h3>Admin belépés</h3>
-          <form id="admin-login-form">
-            <label>
-              Email
-              <input type="email" id="admin-email" required />
-            </label>
-            <label>
-              Jelszó
-              <input type="password" id="admin-password" required />
-            </label>
-            <button type="submit" class="primary">Belépek</button>
-            <p class="helper" id="admin-login-message"></p>
-          </form>
+  <section id="admin-page" class="admin-page" hidden>
+    <div class="admin-shell">
+      <div class="admin-login" id="admin-login-section">
+        <h3>Admin belépés</h3>
+        <form id="admin-login-form">
+          <label>
+            Email
+            <input type="email" id="admin-email" required />
+          </label>
+          <label>
+            Jelszó
+            <input type="password" id="admin-password" required />
+          </label>
+          <button type="submit" class="primary">Belépek</button>
+          <p class="helper" id="admin-login-message"></p>
+        </form>
+      </div>
+
+      <div class="admin-panel" id="admin-panel" hidden>
+        <div class="panel-header">
+          <div>
+            <h3>Óra kezelése</h3>
+            <p class="helper">Itt tudod módosítani az órákat.</p>
+          </div>
+          <div class="form-actions">
+            <button id="regenerate-classes" class="ghost" type="button">Heti órák újragenerálása</button>
+            <button id="admin-logout" class="ghost" type="button">Kijelentkezés</button>
+          </div>
         </div>
 
-        <div class="admin-panel" id="admin-panel" hidden>
-          <div class="panel-header">
-            <div>
-              <h3>Óra kezelése</h3>
-              <p class="helper">Itt tudod módosítani az órákat.</p>
-            </div>
-            <div class="form-actions">
-              <button id="regenerate-classes" class="ghost" type="button">Heti órák újragenerálása</button>
-              <button id="admin-logout" class="ghost" type="button">Kijelentkezés</button>
-            </div>
+        <div class="notice pass-panel">
+          <strong>Bérlet kezelés</strong>
+          <p class="helper">Bérlet állapot és alkalmak admin módosítás.</p>
+          <div class="form-actions">
+            <input type="email" id="pass-admin-email" placeholder="user@email" />
+            <button type="button" class="ghost" id="load-pass-admin">Betöltés</button>
+            <button type="button" class="primary" id="assign-pass">Új 10 alkalmas</button>
           </div>
-
-
-          <div class="notice pass-panel">
-            <strong>Bérlet kezelés</strong>
-            <p class="helper">Bérlet állapot és alkalmak admin módosítás.</p>
-            <div class="form-actions">
-              <input type="email" id="pass-admin-email" placeholder="user@email" />
-              <button type="button" class="ghost" id="load-pass-admin">Betöltés</button>
-              <button type="button" class="primary" id="assign-pass">Új 10 alkalmas</button>
-            </div>
-            <div class="form-actions">
-              <input type="number" id="pass-total" min="0" placeholder="Vásárolt" />
-              <input type="number" id="pass-remaining" min="0" placeholder="Felhasznált" />
-              <button type="button" class="primary" id="save-pass-admin">Mentés</button>
-            </div>
-            <div class="form-actions">
-              <input type="datetime-local" id="pass-use-date" />
-              <button type="button" class="ghost" id="add-pass-use">Alkalom hozzáadása</button>
-            </div>
-            <div class="stack" id="pass-uses-admin"></div>
-            <p class="helper" id="pass-admin-status"></p>
+          <div class="form-actions">
+            <input type="number" id="pass-total" min="0" placeholder="Vásárolt" />
+            <input type="number" id="pass-remaining" min="0" placeholder="Felhasznált" />
+            <button type="button" class="primary" id="save-pass-admin">Mentés</button>
           </div>
-
-
-          <div class="section-title">
-            <h4>Értesítések</h4>
-            <button type="button" class="ghost" id="admin-notifications-toggle" aria-expanded="false">
-              Értesítések megnyitása
-            </button>
+          <div class="form-actions">
+            <input type="datetime-local" id="pass-use-date" />
+            <button type="button" class="ghost" id="add-pass-use">Alkalom hozzáadása</button>
           </div>
-          <div id="admin-notifications" class="stack" hidden></div>
-
-          <div class="section-title">
-            <h4>Folyamatban lévő órák</h4>
-            <button type="button" class="ghost" id="admin-class-toggle" aria-expanded="false">
-              Kártyák megnyitása
-            </button>
-          </div>
-          <div id="admin-class-list" class="card-grid" hidden></div>
-
-          <div class="section-title">
-            <h4>Archívum - Korábbi hetek</h4>
-            <button type="button" class="ghost" id="admin-archive-toggle" aria-expanded="false">
-              Korábbi hetek megnyitása
-            </button>
-          </div>
-          <div id="admin-archive-weeks" class="stack" hidden></div>
-          <div id="admin-archive-detail" class="card-grid" hidden></div>
-
-          <div class="section-title">
-            <h4>Regisztrált tagok és bérlet</h4>
-          </div>
-          <div id="admin-users-pass" class="stack"></div>
-
+          <div class="stack" id="pass-uses-admin"></div>
+          <p class="helper" id="pass-admin-status"></p>
         </div>
+
+        <div class="section-title">
+          <h4>Értesítések</h4>
+          <button type="button" class="ghost" id="admin-notifications-toggle" aria-expanded="false">
+            Értesítések megnyitása
+          </button>
+        </div>
+        <div id="admin-notifications" class="stack" hidden></div>
+
+        <div class="section-title">
+          <h4>Folyamatban lévő órák</h4>
+          <button type="button" class="ghost" id="admin-class-toggle" aria-expanded="false">
+            Kártyák megnyitása
+          </button>
+        </div>
+        <div id="admin-class-list" class="card-grid" hidden></div>
+
+        <div class="section-title">
+          <h4>Archívum - Korábbi hetek</h4>
+          <button type="button" class="ghost" id="admin-archive-toggle" aria-expanded="false">
+            Korábbi hetek megnyitása
+          </button>
+        </div>
+        <div id="admin-archive-weeks" class="stack" hidden></div>
+        <div id="admin-archive-detail" class="card-grid" hidden></div>
+
+        <div class="section-title">
+          <h4>Regisztrált tagok és bérlet</h4>
+        </div>
+        <div id="admin-users-pass" class="stack"></div>
       </div>
     </div>
-  </div>
+  </section>
 
   <div class="modal" id="signups-modal" aria-hidden="true">
     <div class="modal-content">

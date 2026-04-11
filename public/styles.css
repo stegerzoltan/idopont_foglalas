@@ -395,9 +395,13 @@ body.modal-open .quick-menu {
   }
 
   /* Admin panel mobil optimalizáció */
-  .modal-content.large {
-    width: 100%;
-    max-height: 95vh;
+  .admin-page {
+    padding: 1rem 3vw;
+  }
+
+  .admin-page .admin-shell {
+    padding: 1rem;
+    border-radius: 16px;
   }
 
   .admin-panel .form-actions,
@@ -740,6 +744,29 @@ body.modal-open .quick-menu {
 
 .modal-content.large {
   width: min(900px, 100%);
+}
+
+/* Admin full-page layout */
+.admin-page {
+  min-height: calc(100vh - 80px);
+  padding: 2rem 5vw;
+  background: var(--bg-alt);
+  animation: fadeIn 0.2s ease;
+}
+
+.admin-page .admin-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  background: var(--card);
+  border-radius: 24px;
+  padding: 2rem;
+  box-shadow: 0 8px 32px rgba(43, 31, 23, 0.12);
+  border: 1px solid rgba(27, 42, 50, 0.08);
+}
+
+.admin-page .admin-login {
+  max-width: 420px;
+  margin: 0 auto;
 }
 
 .icon-button {

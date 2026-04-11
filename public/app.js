@@ -26,7 +26,7 @@ const userPhone = document.getElementById("user-phone");
 const userConsent = document.getElementById("user-consent");
 const consentText = document.getElementById("consent-text");
 const openAdmin = document.getElementById("open-admin");
-const adminModal = document.getElementById("admin-modal");
+const adminPage = document.getElementById("admin-page");
 const adminLoginForm = document.getElementById("admin-login-form");
 const adminLoginMessage = document.getElementById("admin-login-message");
 const adminPanel = document.getElementById("admin-panel");
@@ -36,7 +36,6 @@ const testTelegramButton = document.getElementById("test-telegram");
 const telegramStatus = document.getElementById("telegram-status");
 const closeSignup = document.getElementById("close-signup");
 const closeUser = document.getElementById("close-user");
-const closeAdmin = document.getElementById("close-admin");
 const adminLogout = document.getElementById("admin-logout");
 const regenerateClassesButton = document.getElementById("regenerate-classes");
 const classMessage = document.getElementById("class-message");
@@ -283,8 +282,21 @@ const closeModal = (modal) => {
   }
 };
 
+const mainSection = document.querySelector("main");
+
+const openAdminPage = () => {
+  if (mainSection) mainSection.hidden = true;
+  adminPage.hidden = false;
+  window.scrollTo(0, 0);
+};
+
+const closeAdminPage = () => {
+  adminPage.hidden = true;
+  if (mainSection) mainSection.hidden = false;
+};
+
 const openAdminLogin = () => {
-  openModal(adminModal);
+  openAdminPage();
   loadAdminData();
 };
 
@@ -1280,26 +1292,23 @@ const loadAdminData = async () => {
     ]);
 
   if (classesResponse.status === 401) {
-    // Fallback: próbáljuk meg a localStorage-ből betölteni
     const cachedAdmin = loadAdminSession();
     if (!cachedAdmin) {
       adminPanel.hidden = true;
-      adminLoginForm.parentElement.hidden = false;
-      if (adminPill) {
-        adminPill.hidden = true;
-      }
+      const loginSection = document.getElementById("admin-login-section");
+      if (loginSection) loginSection.hidden = false;
+      closeAdminPage();
+      if (adminPill) adminPill.hidden = true;
       return;
     }
-    // Ha localStorage-ből van admin session, de API 401, talán új bejelentkezésre van szükség
-    // Azonban ezt követően az API-nak működnie kellene, szóval ezt nem tekintjük sikeres állapotnak
   }
 
   if (!classesResponse.ok || !notificationsResponse.ok || !usersResponse.ok) {
     adminPanel.hidden = true;
-    adminLoginForm.parentElement.hidden = false;
-    if (adminPill) {
-      adminPill.hidden = true;
-    }
+    const loginSection = document.getElementById("admin-login-section");
+    if (loginSection) loginSection.hidden = false;
+    closeAdminPage();
+    if (adminPill) adminPill.hidden = true;
     return;
   }
 
@@ -1314,7 +1323,9 @@ const loadAdminData = async () => {
   setAdminNotificationsVisibility(adminNotificationsOpen);
   renderAdminUsersPass(users);
   adminPanel.hidden = false;
-  adminLoginForm.parentElement.hidden = true;
+  const loginSection = document.getElementById("admin-login-section");
+  if (loginSection) loginSection.hidden = true;
+  openAdminPage();
   if (adminPill) {
     adminPill.hidden = false;
   }
@@ -1649,10 +1660,9 @@ const deletePassUse = async (useId) => {
 const handleAdminUnauthorized = (response) => {
   if (response.status === 401) {
     adminPanel.hidden = true;
-    adminLoginForm.parentElement.hidden = false;
-    if (classMessage) {
-      classMessage.textContent = "Lejárt a belépés. Jelentkezz be újra.";
-    }
+    const loginSection = document.getElementById("admin-login-section");
+    if (loginSection) loginSection.hidden = false;
+    closeAdminPage();
     if (adminPill) {
       adminPill.hidden = true;
     }
@@ -1900,14 +1910,16 @@ adminLoginForm.addEventListener("submit", async (event) => {
   // Töltsd be az admin adatokat
   await loadAdminData();
   adminPanel.hidden = false;
-  closeModal(adminLoginModal);
+  document.getElementById("admin-login-section").hidden = true;
 });
 
 adminLogout?.addEventListener("click", async () => {
   await apiFetch("/api/admin/logout", { method: "POST" });
   clearAdminSession();
   adminPanel.hidden = true;
-  openAdminLogin();
+  const loginSection = document.getElementById("admin-login-section");
+  if (loginSection) loginSection.hidden = false;
+  closeAdminPage();
 });
 
 regenerateClassesButton?.addEventListener("click", async () => {
@@ -2081,7 +2093,7 @@ userLogoutButton?.addEventListener("click", async () => {
   renderSignupsMenu();
 });
 
-closeAdmin.addEventListener("click", () => closeModal(adminModal));
+closeAdmin?.addEventListener("click", () => closeAdminPage());
 closeSignups?.addEventListener("click", () => closeModal(signupsModal));
 closePass?.addEventListener("click", () => closeModal(passModal));
 
@@ -2129,7 +2141,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") {
     return;
   }
-  [signupModal, userModal, adminModal, signupsModal].forEach((modal) => {
+  [signupModal, userModal, signupsModal].forEach((modal) => {
     if (modal && modal.classList.contains("show")) {
       closeModal(modal);
     }
