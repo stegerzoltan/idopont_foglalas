@@ -297,7 +297,12 @@ const closeAdminPage = () => {
 
 const openAdminLogin = () => {
   openAdminPage();
-  loadAdminData();
+  // Ha van cached session, próbáljuk betölteni (esetleg még érvényes)
+  const cachedAdmin = loadAdminSession();
+  if (cachedAdmin) {
+    loadAdminData();
+  }
+  // Ha nincs cached session, csak mutatjuk a belépési szűrőt
 };
 
 const shouldOpenAdminFromUrl = () => {
@@ -1291,24 +1296,13 @@ const loadAdminData = async () => {
       apiFetch("/api/admin/users/with-pass"),
     ]);
 
-  if (classesResponse.status === 401) {
-    const cachedAdmin = loadAdminSession();
-    if (!cachedAdmin) {
-      adminPanel.hidden = true;
-      const loginSection = document.getElementById("admin-login-section");
-      if (loginSection) loginSection.hidden = false;
-      closeAdminPage();
-      if (adminPill) adminPill.hidden = true;
-      return;
-    }
-  }
-
   if (!classesResponse.ok || !notificationsResponse.ok || !usersResponse.ok) {
+    // Session lejárt vagy érvénytelen - mutatjuk a belépési űrlapot az admin oldalon belül
     adminPanel.hidden = true;
     const loginSection = document.getElementById("admin-login-section");
     if (loginSection) loginSection.hidden = false;
-    closeAdminPage();
     if (adminPill) adminPill.hidden = true;
+    // NEM zárjuk be az admin oldalt - a belépési űrlap látszik
     return;
   }
 
@@ -1662,10 +1656,10 @@ const handleAdminUnauthorized = (response) => {
     adminPanel.hidden = true;
     const loginSection = document.getElementById("admin-login-section");
     if (loginSection) loginSection.hidden = false;
-    closeAdminPage();
     if (adminPill) {
       adminPill.hidden = true;
     }
+    // NEM zárjuk be az admin oldalt - a belépési űrlap látszik
     return true;
   }
   return false;
@@ -2093,7 +2087,6 @@ userLogoutButton?.addEventListener("click", async () => {
   renderSignupsMenu();
 });
 
-closeAdmin?.addEventListener("click", () => closeAdminPage());
 closeSignups?.addEventListener("click", () => closeModal(signupsModal));
 closePass?.addEventListener("click", () => closeModal(passModal));
 
