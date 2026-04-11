@@ -126,7 +126,10 @@ const LOCAL_STORAGE_ADMIN_KEY = "__admin_session__";
 
 const saveAdminSession = () => {
   try {
-    localStorage.setItem(LOCAL_STORAGE_ADMIN_KEY, JSON.stringify({ isAdmin: true }));
+    localStorage.setItem(
+      LOCAL_STORAGE_ADMIN_KEY,
+      JSON.stringify({ isAdmin: true }),
+    );
   } catch (err) {
     console.warn("localStorage nem elérhető", err);
   }
@@ -1900,12 +1903,12 @@ adminLoginForm.addEventListener("submit", async (event) => {
 
   const data = await response.json();
   adminLoginMessage.textContent = "Sikeres belépés.";
-  
+
   // Mentsük el a localStorage-ba az admin session-t
   if (data.isAdmin) {
     saveAdminSession();
   }
-  
+
   await loadAdminData();
   if (adminPill) {
     adminPill.hidden = false;
