@@ -109,81 +109,17 @@ const MAX_SIGNUPS = 10;
 
 const FRIDAY_DISABLED_SLOTS = new Set(["16:00", "17:00", "18:00", "19:00"]);
 
-const LOCAL_STORAGE_ADMIN_TOKEN_KEY = "__admin_token__";
-
-const saveAdminToken = (token) => {
-  try {
-    localStorage.setItem(LOCAL_STORAGE_ADMIN_TOKEN_KEY, token);
-  } catch (err) {
-    console.warn("localStorage nem elérhető", err);
-  }
-};
-
-const getAdminToken = () => {
-  try {
-    return localStorage.getItem(LOCAL_STORAGE_ADMIN_TOKEN_KEY);
-  } catch (err) {
-    console.warn("localStorage olvasás hiba", err);
-    return null;
-  }
-};
-
-const clearAdminToken = () => {
-  try {
-    localStorage.removeItem(LOCAL_STORAGE_ADMIN_TOKEN_KEY);
-  } catch (err) {
-    console.warn("localStorage törlés hiba", err);
-  }
-};
-
-// User token storage for API auth
-const LOCAL_STORAGE_USER_TOKEN_KEY = "__user_token__";
-
-const saveUserToken = (token) => {
-  try {
-    localStorage.setItem(LOCAL_STORAGE_USER_TOKEN_KEY, token);
-  } catch (err) {
-    console.warn("localStorage nem elérhető", err);
-  }
-};
-
-const getUserToken = () => {
-  try {
-    return localStorage.getItem(LOCAL_STORAGE_USER_TOKEN_KEY);
-  } catch (err) {
-    console.warn("localStorage olvasás hiba", err);
-    return null;
-  }
-};
-
-const clearUserToken = () => {
-  try {
-    localStorage.removeItem(LOCAL_STORAGE_USER_TOKEN_KEY);
-  } catch (err) {
-    console.warn("localStorage törlés hiba", err);
-  }
-};
+// Token storage removed - using session-based auth instead
 
 // Helper function for API calls that maintains session cookies
 const apiFetch = (url, options = {}) => {
-  const headers = {
-    "Content-Type": "application/json",
-    ...options.headers,
-  };
-
-  // Admin token hozzáadása az admin API hívásokhoz
-  if (url.includes("/api/admin") && getAdminToken()) {
-    headers["Authorization"] = `Bearer ${getAdminToken()}`;
-  }
-  // User token hozzáadása az összes többi API híváshoz (ha van user token)
-  else if (getUserToken()) {
-    headers["Authorization"] = `Bearer ${getUserToken()}`;
-  }
-
   return fetch(url, {
     credentials: "same-origin",
     ...options,
-    headers,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
 };
 
@@ -1940,10 +1876,6 @@ userLoginForm.addEventListener("submit", async (event) => {
   currentUser = data.user;
   // Mentsük el a localStorage-ba a gyors betöltéshez az oldal újbetöltésekor
   saveUserSession(currentUser);
-  // Mentsük el az user token-t localStorage-ba
-  if (data.userToken) {
-    saveUserToken(data.userToken);
-  }
   updateUserUI();
   userLoginMessage.textContent =
     authMode === "register" ? "Sikeres regisztráció." : "Sikeres belépés.";
@@ -1974,11 +1906,6 @@ adminLoginForm.addEventListener("submit", async (event) => {
   const data = await response.json();
   adminLoginMessage.textContent = "Sikeres belépés.";
 
-  // Mentsük el az admin token-t localStorage-ba
-  if (data.adminToken) {
-    saveAdminToken(data.adminToken);
-  }
-
   // Töltsd be az admin adatokat
   await loadAdminData();
   adminPanel.hidden = false;
@@ -1987,7 +1914,6 @@ adminLoginForm.addEventListener("submit", async (event) => {
 
 adminLogout?.addEventListener("click", async () => {
   await apiFetch("/api/admin/logout", { method: "POST" });
-  clearAdminToken();
   clearAdminSession();
   adminPanel.hidden = true;
   openAdminLogin();

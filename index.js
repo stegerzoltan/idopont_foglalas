@@ -505,40 +505,16 @@ const verifyPassword = (password, salt, hash) => {
 };
 
 const requireAdmin = (req, res, next) => {
-  // Session-based auth
   if (req.session && req.session.isAdmin) {
     return next();
   }
-
-  // Bearer token auth for admin API
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const token = authHeader.substring(7);
-    if (token && token.length > 0) {
-      return next();
-    }
-  }
-
   return res.status(401).json({ error: "Unauthorized" });
 };
 
 const requireUser = (req, res, next) => {
-  // Session-based auth
   if (req.session && req.session.user) {
     return next();
   }
-  
-  // Bearer token auth for user API
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const token = authHeader.substring(7);
-    if (token && token.length > 0) {
-      // For now, we accept any non-empty token
-      // In production, you'd validate against a token store
-      return next();
-    }
-  }
-  
   return res.status(401).json({ error: "Login required" });
 };
 
@@ -1031,14 +1007,11 @@ app.post("/api/auth/register", (req, res) => {
       }
       const user = { fullName, email, birthDate, phone };
       req.session.user = user;
-      // User token for API auth
-      const userToken = Buffer.from(`user:${email}:${Date.now()}`).toString("base64");
-      req.session.userToken = userToken;
       req.session.save((saveErr) => {
         if (saveErr) {
           return res.status(500).json({ error: "Session save error" });
         }
-        return res.json({ ok: true, user, userToken });
+        return res.json({ ok: true, user });
       });
     },
   );
@@ -1078,14 +1051,11 @@ app.post("/api/auth/login", (req, res) => {
               phone: row.phone,
             };
             req.session.user = user;
-            // User token for API auth
-            const userToken = Buffer.from(`user:${email}:${Date.now()}`).toString("base64");
-            req.session.userToken = userToken;
             req.session.save((saveErr) => {
               if (saveErr) {
                 return res.status(500).json({ error: "Session save error" });
               }
-              return res.json({ ok: true, user, userToken });
+              return res.json({ ok: true, user });
             });
           },
         );
@@ -1101,14 +1071,11 @@ app.post("/api/auth/login", (req, res) => {
         phone: row.phone,
       };
       req.session.user = user;
-      // User token for API auth
-      const userToken = Buffer.from(`user:${email}:${Date.now()}`).toString("base64");
-      req.session.userToken = userToken;
       req.session.save((saveErr) => {
         if (saveErr) {
           return res.status(500).json({ error: "Session save error" });
         }
-        return res.json({ ok: true, user, userToken });
+        return res.json({ ok: true, user });
       });
     },
   );
@@ -1462,7 +1429,7 @@ app.post("/api/admin/login", (req, res) => {
       if (saveErr) {
         return res.status(500).json({ error: "Session save error" });
       }
-      return res.json({ ok: true, isAdmin: true, adminToken });
+      return res.json({ ok: true, isAdmin: true });
     });
   } else {
     return res.status(401).json({ error: "Invalid credentials" });
