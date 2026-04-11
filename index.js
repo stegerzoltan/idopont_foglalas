@@ -5,6 +5,7 @@ const fs = require("fs");
 const express = require("express");
 const session = require("express-session");
 const PgSession = require("connect-pg-simple")(session);
+const SqliteStore = require("connect-sqlite3")(session);
 const { Pool } = require("pg");
 const sqlite3 = require("sqlite3").verbose();
 const crypto = require("crypto");
@@ -176,6 +177,14 @@ if (IS_POSTGRES && pgPool) {
     pool: pgPool,
     tableName: "user_sessions",
     createTableIfMissing: true,
+  });
+} else {
+  // SQLite session store - persistent session storage
+  const DB_PATH = process.env.DB_PATH || path.join(__dirname, "data.db");
+  sessionOptions.store = new SqliteStore({
+    db: DB_PATH,
+    table: "sessions",
+    dir: path.dirname(DB_PATH),
   });
 }
 
