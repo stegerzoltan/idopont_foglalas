@@ -1074,11 +1074,16 @@ const renderPass = (data) => {
   });
   const purchased = Number(data.pass.total) || 0;
   const used = Array.isArray(data.uses) ? data.uses.length : 0;
+  const debt = used - purchased;
+  const debtHtml =
+    debt > 0
+      ? `<br /><span class="pass-debt">Tartozás: ${debt} alkalom</span>`
+      : "";
   passSummary.innerHTML = `
     <div class="notice">
       <strong>Aktív bérlet</strong><br />
       Vásárlás dátuma: ${createdLabel}<br />
-      Vásárolt: ${purchased} | Felhasznált: ${used}
+      Vásárolt: ${purchased} | Felhasznált: ${used}${debtHtml}
     </div>
   `;
   if (!data.uses || data.uses.length === 0) {
@@ -1358,6 +1363,12 @@ const renderAdminPass = (data) => {
   // Use actual pass_uses count instead of derived remaining to stay in sync
   const actualUsed = Array.isArray(data.uses) ? data.uses.length : 0;
   passRemainingInput.value = String(actualUsed);
+  const adminDebt = actualUsed - Number(data.pass.total);
+  if (adminDebt > 0) {
+    passAdminStatus.innerHTML = `<span class="pass-debt">Tartozás: ${adminDebt} alkalom</span>`;
+  } else {
+    passAdminStatus.textContent = "";
+  }
   if (!data.uses || data.uses.length === 0) {
     passUsesAdmin.innerHTML =
       '<div class="notice">Nincs még levont alkalom.</div>';
@@ -1414,9 +1425,19 @@ const renderAdminUsersPass = (users) => {
           day: "numeric",
         })
       : "-";
+    const passUsed =
+      user.passUsed != null
+        ? Number(user.passUsed)
+        : Math.max(0, Number(user.passTotal) - Number(user.passRemaining));
+    const debtCount =
+      user.passTotal != null ? passUsed - Number(user.passTotal) : 0;
+    const debtStr =
+      debtCount > 0
+        ? ` <span class="pass-debt">Tartozás: ${debtCount}</span>`
+        : "";
     const passLabel =
       user.passTotal != null && user.passRemaining != null
-        ? `Vásárolt: ${user.passTotal} | Felhasznált: ${user.passUsed != null ? Number(user.passUsed) : Math.max(0, Number(user.passTotal) - Number(user.passRemaining))}`
+        ? `Vásárolt: ${user.passTotal} | Felhasznált: ${passUsed}${debtStr}`
         : "Nincs bérlet";
     const row = document.createElement("tr");
     row.innerHTML = `
@@ -2212,6 +2233,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const stripeParam = new URLSearchParams(window.location.search).get("stripe");
   if (stripeParam === "success") {
     history.replaceState(null, "", "/");
+    showToast("Sikeres vásárlás! Köszönöm a bizalmat! 🎉");
     loadPass().then(() => openModal(passModal));
   }
 });
@@ -2277,6 +2299,21 @@ const scheduleWeekRefresh = () => {
 };
 
 // Easter Banner
+const showToast = (message, type = "success", durationMs = 3000) => {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+  const toast = document.createElement("div");
+  toast.className = `toast${type ? ` ${type}` : ""}`;
+  toast.innerHTML = `<span>${message}</span><button class="toast-close" aria-label="Bezárás">✕</button>`;
+  container.appendChild(toast);
+  const dismiss = () => {
+    toast.classList.add("is-hiding");
+    setTimeout(() => toast.remove(), 300);
+  };
+  toast.querySelector(".toast-close").addEventListener("click", dismiss);
+  setTimeout(dismiss, durationMs);
+};
+
 const initEasterBanner = () => {
   const today = new Date();
   const month = today.getMonth() + 1; // 1-12

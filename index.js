@@ -878,7 +878,7 @@ const processDuePassUses = () => {
           "SELECT id, remaining FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
           [email],
           (passErr, passRow) => {
-            if (passErr || !passRow || passRow.remaining <= 0) {
+            if (passErr || !passRow) {
               return processNext(index + 1);
             }
             db.get(
@@ -894,7 +894,7 @@ const processDuePassUses = () => {
                 }
                 const usedAt = new Date().toISOString();
                 db.run(
-                  "UPDATE passes SET remaining = remaining - 1 WHERE id = ? AND remaining > 0",
+                  "UPDATE passes SET remaining = remaining - 1 WHERE id = ?",
                   [passRow.id],
                   function onUpdate(updateErr) {
                     if (updateErr || this.changes === 0) {
@@ -1519,17 +1519,12 @@ app.post("/api/admin/passes/assign", requireAdmin, (req, res) => {
     if (!row) {
       return res.status(404).json({ error: "User not found" });
     }
-    const createdAt = new Date().toISOString();
-    db.run(
-      "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)",
-      [email, 10, 10, createdAt],
-      function onInsert(insertErr) {
-        if (insertErr) {
-          return res.status(500).json({ error: "Database error" });
-        }
-        return res.json({ id: this.lastID, total: 10, remaining: 10 });
-      },
-    );
+    createPassWithDebtTransfer(email, 10, null, (createErr) => {
+      if (createErr) {
+        return res.status(500).json({ error: "Database error" });
+      }
+      return res.json({ ok: true, total: 10 });
+    });
   });
 });
 
@@ -1672,13 +1667,10 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
           }
 
           const currentUsed = countRow ? countRow.count : 0;
-          if (currentUsed >= passRow.total) {
-            return res.status(400).json({ error: "No remaining uses" });
-          }
 
           const usedAt = used_at || new Date().toISOString();
 
-          // Insert the pass use
+          // Insert the pass use (no upper limit - remaining can go negative = debt)
           db.run(
             "INSERT INTO pass_uses (pass_id, used_at) VALUES (?, ?)",
             [passRow.id, usedAt],
@@ -1691,8 +1683,8 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
 
               const insertedId = this.lastID;
 
-              // Update remaining to keep it in sync with actual uses
-              const remaining = Math.max(0, passRow.total - (currentUsed + 1));
+              // Update remaining (can be negative = debt)
+              const remaining = passRow.total - (currentUsed + 1);
               db.run(
                 "UPDATE passes SET remaining = ? WHERE id = ?",
                 [remaining, passRow.id],
@@ -1729,7 +1721,7 @@ app.delete("/api/admin/passes/use/:id", requireAdmin, (req, res) => {
         return res.status(500).json({ error: "Database error" });
       }
       db.run(
-        "UPDATE passes SET remaining = CASE WHEN remaining < total THEN remaining + 1 ELSE remaining END WHERE id = ?",
+        "UPDATE passes SET remaining = remaining + 1 WHERE id = ?",
         [row.pass_id],
         (updateErr) => {
           if (updateErr) {
@@ -3063,6 +3055,80 @@ app.post(
 // ---------------------------------------------------------------------------
 // Shared helper: assign a 10-session pass to a user by Stripe session ID
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Shared helper: create a new pass, carry over any debt from previous pass,
+// and delete old pass_uses (fresh start for the user)
+// stripeSessionId is optional (null for manual admin assignment)
+// ---------------------------------------------------------------------------
+const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
+  // 1. Find existing pass
+  db.get(
+    "SELECT id, total FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
+    [userEmail],
+    (err, oldPass) => {
+      if (err) return cb(err);
+
+      const doCreate = (debt) => {
+        const createdAt = new Date().toISOString();
+        const newRemaining = total - debt;
+        const insertSql = stripeSessionId
+          ? "INSERT INTO passes (user_email, total, remaining, created_at, stripe_session_id) VALUES (?, ?, ?, ?, ?)"
+          : "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)";
+        const insertParams = stripeSessionId
+          ? [userEmail, total, newRemaining, createdAt, stripeSessionId]
+          : [userEmail, total, newRemaining, createdAt];
+        db.run(insertSql, insertParams, function onInsert(insertErr) {
+          if (insertErr) return cb(insertErr);
+          const newPassId = this.lastID;
+          if (debt <= 0) return cb(null, true);
+          // Insert debt uses into the new pass
+          const now = new Date().toISOString();
+          let pending = debt;
+          let failed = false;
+          for (let i = 0; i < debt; i++) {
+            db.run(
+              "INSERT INTO pass_uses (pass_id, used_at) VALUES (?, ?)",
+              [newPassId, now],
+              (useErr) => {
+                if (useErr && !failed) {
+                  failed = true;
+                  return cb(useErr);
+                }
+                pending--;
+                if (pending === 0 && !failed) cb(null, true);
+              },
+            );
+          }
+        });
+      };
+
+      if (!oldPass) {
+        return doCreate(0);
+      }
+
+      // Count old uses to determine debt
+      db.get(
+        "SELECT COUNT(*) AS cnt FROM pass_uses WHERE pass_id = ?",
+        [oldPass.id],
+        (cntErr, cntRow) => {
+          if (cntErr) return cb(cntErr);
+          const oldUsed = cntRow ? cntRow.cnt : 0;
+          const debt = Math.max(0, oldUsed - oldPass.total);
+          // Delete old pass_uses
+          db.run(
+            "DELETE FROM pass_uses WHERE pass_id = ?",
+            [oldPass.id],
+            (delErr) => {
+              if (delErr) return cb(delErr);
+              doCreate(debt);
+            },
+          );
+        },
+      );
+    },
+  );
+};
+
 const assignPassForStripeSession = (stripeSessionId, userEmail, cb) => {
   db.get(
     "SELECT id FROM passes WHERE stripe_session_id = ?",
@@ -3070,12 +3136,12 @@ const assignPassForStripeSession = (stripeSessionId, userEmail, cb) => {
     (err, existing) => {
       if (err) return cb(err);
       if (existing) return cb(null, false); // already processed
-      const createdAt = new Date().toISOString();
-      db.run(
-        "INSERT INTO passes (user_email, total, remaining, created_at, stripe_session_id) VALUES (?, ?, ?, ?, ?)",
-        [userEmail, 10, 10, createdAt, stripeSessionId],
-        function onInsert(insertErr) {
-          if (insertErr) return cb(insertErr);
+      createPassWithDebtTransfer(
+        userEmail,
+        10,
+        stripeSessionId,
+        (createErr) => {
+          if (createErr) return cb(createErr);
           console.log(
             `Pass assigned to ${userEmail} via Stripe session ${stripeSessionId}`,
           );
