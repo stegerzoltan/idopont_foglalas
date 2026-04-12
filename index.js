@@ -849,6 +849,49 @@ const seedWeeklyClasses = () => {
   );
 };
 
+// ---------------------------------------------------------------------------
+// Helper: if the class is in the past and the user has an active pass,
+// deduct a pass use (idempotent – skips if already deducted for this class)
+// ---------------------------------------------------------------------------
+const deductPassUseForClassIfPast = (userEmail, classId, classStartsAt, cb) => {
+  const now = new Date();
+  const classStart = new Date(classStartsAt);
+  if (classStart > now) {
+    // future class – processDuePassUses will handle it later
+    return cb(null);
+  }
+  db.get(
+    "SELECT id FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
+    [userEmail],
+    (passErr, passRow) => {
+      if (passErr || !passRow) return cb(null); // no pass → nothing to deduct
+      // idempotency: already deducted for this class?
+      db.get(
+        `SELECT pu.id FROM pass_uses pu
+         JOIN passes p ON pu.pass_id = p.id
+         WHERE p.user_email = ? AND pu.class_id = ? LIMIT 1`,
+        [userEmail, classId],
+        (dupeErr, dupeRow) => {
+          if (dupeErr || dupeRow) return cb(null); // already done
+          const usedAt = new Date().toISOString();
+          db.run(
+            "UPDATE passes SET remaining = remaining - 1 WHERE id = ?",
+            [passRow.id],
+            function onUpdate(updateErr) {
+              if (updateErr || this.changes === 0) return cb(null);
+              db.run(
+                "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
+                [passRow.id, classId, usedAt],
+                (insertErr) => cb(insertErr || null),
+              );
+            },
+          );
+        },
+      );
+    },
+  );
+};
+
 const processDuePassUses = () => {
   const now = new Date();
   const cutoff = new Date(
@@ -2156,6 +2199,13 @@ app.post("/api/admin/classes/:id/signups", requireAdmin, (req, res) => {
                     sendTelegramMessage(
                       `Új feliratkozás: ${signupName} (${signupEmail}) - ${classRow.title} (${classRow.starts_at})`,
                     );
+                    // If class is in the past, immediately deduct pass use
+                    deductPassUseForClassIfPast(
+                      signupEmail,
+                      classId,
+                      classRow.starts_at,
+                      () => {},
+                    );
                     return res.json({ id: this.lastID });
                   },
                 );
@@ -2469,6 +2519,13 @@ app.post("/api/admin/signups/:id/approve", requireAdmin, (req, res) => {
               createNotification(
                 "approve",
                 `Jovahagyva: ${row.name} (${row.email}) - ${row.class_title} (${row.class_starts})`,
+              );
+              // If class is in the past, immediately deduct pass use
+              deductPassUseForClassIfPast(
+                row.email,
+                row.class_id,
+                row.class_starts,
+                () => {},
               );
               return res.json({ status: "confirmed" });
             },
