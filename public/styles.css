@@ -1300,44 +1300,109 @@ input, textarea {
   top: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(90deg, rgba(185, 56, 74, 0.95), rgba(255, 107, 53, 0.90));
+  height: 25vh;
+  min-height: 160px;
+  max-height: 280px;
+  background: linear-gradient(160deg, rgba(185, 56, 74, 0.97) 0%, rgba(255, 107, 53, 0.95) 100%);
   color: white;
-  text-align: center;
-  padding: 1rem;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 1.5rem 2rem;
+  z-index: 1900;
+  animation: slideDown 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  backdrop-filter: blur(8px);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 8px 40px rgba(185, 56, 74, 0.35);
+}
+
+.easter-banner-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  width: 100%;
+  max-width: 720px;
+}
+
+.easter-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.easter-banner-text strong {
+  font-size: clamp(1.5rem, 3.5vw, 2.2rem);
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.easter-banner-text span {
+  font-size: clamp(0.95rem, 2vw, 1.15rem);
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 400;
+}
+
+.easter-banner-actions {
+  display: flex;
+  align-items: center;
   gap: 1rem;
-  z-index: 100;
-  animation: slideDown 0.4s ease;
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.easter-banner-actions .primary {
   font-size: 1rem;
+  padding: 0.7rem 1.5rem;
+  white-space: nowrap;
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.5);
+  color: #fff;
+}
+
+.easter-banner-actions .primary:hover {
+  background: rgba(255,255,255,0.35);
 }
 
 .easter-banner__close {
   background: none;
   border: none;
-  color: white;
-  font-size: 1.5rem;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 1.3rem;
   cursor: pointer;
   padding: 0;
-  width: 1.5rem;
-  height: 1.5rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 0.2s ease;
+  transition: color 0.15s;
   flex-shrink: 0;
 }
 
 .easter-banner__close:hover {
-  opacity: 0.8;
+  color: #fff;
 }
 
 .easter-banner.hidden {
   animation: slideUp 0.4s ease forwards;
+}
+
+@media (max-width: 600px) {
+  .easter-banner {
+    height: auto;
+    min-height: 25vh;
+    padding: 1.25rem 1.25rem;
+  }
+
+  .easter-banner-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .easter-banner-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 
 @keyframes slideDown {

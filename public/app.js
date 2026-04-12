@@ -109,6 +109,58 @@ greetingCloseButton?.addEventListener("click", () => {
   hideGreetingBanner();
 });
 
+// Easter banner helpers
+const _isEasterPeriod = () => {
+  const today = new Date();
+  const m = today.getMonth() + 1;
+  const d = today.getDate();
+  return (m === 3 && d >= 30) || m === 4;
+};
+
+const hideEasterBanner = () => {
+  const bannerEl = document.getElementById("easter-banner");
+  if (!bannerEl || bannerEl.hidden) return;
+  bannerEl.classList.add("hidden");
+  setTimeout(() => {
+    bannerEl.setAttribute("hidden", "");
+    bannerEl.classList.remove("hidden");
+  }, 400);
+};
+
+const showEasterBanner = (user) => {
+  if (!_isEasterPeriod()) return;
+  const bannerEl = document.getElementById("easter-banner");
+  if (!bannerEl || bannerEl._easterShown) return;
+  bannerEl._easterShown = true;
+
+  const titleEl = document.getElementById("easter-banner-title");
+  const subEl = document.getElementById("easter-banner-sub");
+  const loginBtn = document.getElementById("easter-login-button");
+  const closeBtn = document.getElementById("easter-banner-close");
+
+  const today = new Date();
+  const m = today.getMonth() + 1;
+  const d = today.getDate();
+  const hasEggs = (m === 3 && d >= 30) || (m === 4 && d <= 6);
+  const egg = hasEggs ? "🥚 " : "";
+  const eggEnd = hasEggs ? " 🥚" : "";
+
+  if (user) {
+    const name = user.fullName || user.name || user.email;
+    if (titleEl) titleEl.textContent = `${egg}Üdvözöllek kedves ${name}!${eggEnd}`;
+    if (subEl) subEl.textContent = "";
+    if (loginBtn) loginBtn.hidden = true;
+  } else {
+    if (titleEl) titleEl.textContent = `${egg}Üdvözöllek!${eggEnd}`;
+    if (subEl) subEl.textContent = "Kérlek jelentkezz be vagy regisztrálj!";
+    if (loginBtn) loginBtn.hidden = false;
+  }
+
+  bannerEl.removeAttribute("hidden");
+  if (closeBtn) closeBtn.onclick = () => hideEasterBanner();
+  setTimeout(() => hideEasterBanner(), 4000);
+};
+
 const WEEK_DAYS = [
   { key: 1, label: "Hétfő" },
   { key: 2, label: "Kedd" },
@@ -1765,6 +1817,9 @@ const updateUserUI = () => {
   const userLogoutSection = document.getElementById("user-logout-section");
   const userLogoutName = document.getElementById("user-logout-name");
 
+  // Easter banner megjelenítése a belépési állapot ismeretében (csak egyszer)
+  showEasterBanner(currentUser);
+
   if (currentUser) {
     userPill.hidden = false;
     userPill.textContent = `Üdvözöllek, ${currentUser.fullName || currentUser.name || currentUser.email}!`;
@@ -2346,38 +2401,3 @@ const showToast = (message, type = "success", durationMs = 3000) => {
   toast.querySelector(".toast-close").addEventListener("click", dismiss);
   setTimeout(dismiss, durationMs);
 };
-
-const initEasterBanner = () => {
-  const today = new Date();
-  const month = today.getMonth() + 1; // 1-12
-  const day = today.getDate();
-
-  // Show banner from March 30 to April 30
-  if ((month === 3 && day >= 30) || month === 4) {
-    const bannerEl = document.getElementById("easter-banner");
-    const bannerTextEl = document.getElementById("easter-banner-text");
-
-    // Determine text based on date
-    // With eggs: March 30 - April 6
-    // Without eggs: April 7 - April 30
-    if ((month === 3 && day >= 30) || (month === 4 && day <= 6)) {
-      bannerTextEl.textContent = "🥚 Kellemes hétvégét! 🥚";
-    } else {
-      bannerTextEl.textContent = "Kellemes hétvégét!";
-    }
-
-    // Show banner
-    bannerEl.removeAttribute("hidden");
-
-    // Auto-hide after 2.5 seconds
-    setTimeout(() => {
-      if (!bannerEl.hidden) {
-        bannerEl.classList.add("hidden");
-        setTimeout(() => bannerEl.setAttribute("hidden", ""), 400);
-      }
-    }, 2500);
-  }
-};
-
-// Initialize Easter banner
-initEasterBanner();
