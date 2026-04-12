@@ -151,7 +151,13 @@ const showEasterBanner = (user) => {
 
   bannerEl.removeAttribute("hidden");
   if (closeBtn) closeBtn.onclick = () => hideEasterBanner();
-  setTimeout(() => hideEasterBanner(), 4000);
+  if (loginBtn)
+    loginBtn.onclick = () => {
+      hideEasterBanner();
+      setAuthMode("login");
+      openModal(userModal);
+    };
+  setTimeout(() => hideEasterBanner(), 2000);
 };
 
 const WEEK_DAYS = [
@@ -2307,7 +2313,6 @@ window.addEventListener("DOMContentLoaded", () => {
   const stripeParam = new URLSearchParams(window.location.search).get("stripe");
   if (stripeParam === "success") {
     history.replaceState(null, "", "/");
-    showToast("Sikeres vásárlás! Köszönöm a bizalmat! 🎉");
     loadPass().then(() => openModal(passModal));
   }
 

@@ -1671,8 +1671,7 @@ app.get("/api/admin/passes/:email", requireAdmin, (req, res) => {
             uses: useRows.map((row) => ({
               id: row.id,
               usedAt: row.used_at,
-              title:
-                row.title || (row.class_id ? "Alkalom" : "Átvitt tartozás"),
+              title: row.title || "Alkalom",
               startsAt: row.starts_at || row.used_at,
             })),
           });
