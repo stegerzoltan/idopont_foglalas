@@ -138,20 +138,13 @@ const showEasterBanner = (user) => {
   const loginBtn = document.getElementById("easter-login-button");
   const closeBtn = document.getElementById("easter-banner-close");
 
-  const today = new Date();
-  const m = today.getMonth() + 1;
-  const d = today.getDate();
-  const hasEggs = (m === 3 && d >= 30) || (m === 4 && d <= 6);
-  const egg = hasEggs ? "🥚 " : "";
-  const eggEnd = hasEggs ? " 🥚" : "";
-
   if (user) {
     const name = user.fullName || user.name || user.email;
-    if (titleEl) titleEl.textContent = `${egg}Üdvözöllek kedves ${name}!${eggEnd}`;
+    if (titleEl) titleEl.textContent = `Üdvözöllek kedves ${name}!`;
     if (subEl) subEl.textContent = "";
     if (loginBtn) loginBtn.hidden = true;
   } else {
-    if (titleEl) titleEl.textContent = `${egg}Üdvözöllek!${eggEnd}`;
+    if (titleEl) titleEl.textContent = "Üdvözöllek!";
     if (subEl) subEl.textContent = "Kérlek jelentkezz be vagy regisztrálj!";
     if (loginBtn) loginBtn.hidden = false;
   }
