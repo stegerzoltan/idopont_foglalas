@@ -74,6 +74,9 @@ const passAdminStatus = document.getElementById("pass-admin-status");
 const adminArchiveToggle = document.getElementById("admin-archive-toggle");
 const adminArchiveWeeks = document.getElementById("admin-archive-weeks");
 const adminArchiveDetail = document.getElementById("admin-archive-detail");
+const greetingBanner = document.getElementById("greeting-banner");
+const greetingLoginButton = document.getElementById("greeting-login-button");
+const greetingCloseButton = document.getElementById("greeting-close-button");
 
 let currentUser = null;
 let lastClasses = [];
@@ -86,6 +89,25 @@ let adminClassesCache = [];
 let adminUsersCache = [];
 let adminClassesOpen = false;
 let adminNotificationsOpen = false;
+
+// Greeting banner helpers
+const hideGreetingBanner = () => {
+  if (!greetingBanner || greetingBanner.hidden) return;
+  greetingBanner.classList.add("is-hiding");
+  setTimeout(() => {
+    greetingBanner.hidden = true;
+    greetingBanner.classList.remove("is-hiding");
+  }, 350);
+};
+
+const showGreetingBanner = () => {
+  if (!greetingBanner) return;
+  greetingBanner.hidden = false;
+};
+
+greetingCloseButton?.addEventListener("click", () => {
+  hideGreetingBanner();
+});
 
 const WEEK_DAYS = [
   { key: 1, label: "Hétfő" },
@@ -1745,9 +1767,11 @@ const updateUserUI = () => {
 
   if (currentUser) {
     userPill.hidden = false;
-    userPill.textContent = `Bejelentkezve: ${currentUser.fullName || currentUser.name || currentUser.email}`;
+    userPill.textContent = `Üdvözöllek, ${currentUser.fullName || currentUser.name || currentUser.email}!`;
     userPill.classList.add("is-logged-in");
     openUser.textContent = "Profil";
+    // Greeting banner elrejtése bejelentkezés után
+    hideGreetingBanner();
     if (openSignups) {
       openSignups.hidden = false;
     }
@@ -1783,6 +1807,8 @@ const updateUserUI = () => {
     if (userLogoutSection) {
       userLogoutSection.hidden = true;
     }
+    // Greeting banner megjelenítése nem bejelentkezett állapotban
+    showGreetingBanner();
   }
   signupName.disabled = true;
   signupEmail.disabled = true;
@@ -2236,6 +2262,13 @@ window.addEventListener("DOMContentLoaded", () => {
     showToast("Sikeres vásárlás! Köszönöm a bizalmat! 🎉");
     loadPass().then(() => openModal(passModal));
   }
+
+  // Greeting banner: belépés gomb az összes függvény definíciója után
+  greetingLoginButton?.addEventListener("click", () => {
+    hideGreetingBanner();
+    setAuthMode("login");
+    openModal(userModal);
+  });
 });
 
 userPhone?.addEventListener("input", () => {

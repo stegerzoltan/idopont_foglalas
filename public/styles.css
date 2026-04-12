@@ -1135,6 +1135,117 @@ input, textarea {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Greeting banner – nem bejelentkezett vendégeknek */
+.greeting-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 25vh;
+  min-height: 160px;
+  max-height: 280px;
+  background: linear-gradient(160deg, rgba(27, 42, 50, 0.97) 0%, rgba(43, 31, 23, 0.97) 100%);
+  color: #fff;
+  z-index: 1800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem 2rem;
+  box-shadow: 0 -8px 40px rgba(43, 31, 23, 0.35);
+  backdrop-filter: blur(10px);
+  animation: greetingSlideUp 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  border-top: 2px solid rgba(192, 125, 74, 0.45);
+}
+
+.greeting-banner[hidden] {
+  display: none;
+}
+
+.greeting-banner.is-hiding {
+  animation: greetingSlideDown 0.35s ease forwards;
+}
+
+.greeting-banner-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  width: 100%;
+  max-width: 720px;
+}
+
+.greeting-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.greeting-banner-text strong {
+  font-size: clamp(1.5rem, 3.5vw, 2.2rem);
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.greeting-banner-text span {
+  font-size: clamp(0.95rem, 2vw, 1.15rem);
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 400;
+}
+
+.greeting-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-shrink: 0;
+}
+
+.greeting-banner-actions .primary {
+  font-size: 1rem;
+  padding: 0.7rem 1.5rem;
+  white-space: nowrap;
+}
+
+.greeting-banner-actions .icon-button {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 1.2rem;
+}
+
+.greeting-banner-actions .icon-button:hover {
+  color: #fff;
+}
+
+@keyframes greetingSlideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+@keyframes greetingSlideDown {
+  from { transform: translateY(0);    opacity: 1; }
+  to   { transform: translateY(100%); opacity: 0; }
+}
+
+@media (max-width: 600px) {
+  .greeting-banner {
+    height: auto;
+    min-height: 25vh;
+    padding: 1.25rem 1.25rem;
+  }
+
+  .greeting-banner-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .greeting-banner-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+
+
 @keyframes pageFade {
   from { opacity: 0; }
   to { opacity: 1; }

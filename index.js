@@ -1555,20 +1555,87 @@ app.post("/api/admin/passes/assign", requireAdmin, (req, res) => {
   if (!email) {
     return res.status(400).json({ error: "Email required" });
   }
-  db.get("SELECT email FROM users WHERE email = ?", [email], (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: "Database error" });
-    }
-    if (!row) {
-      return res.status(404).json({ error: "User not found" });
-    }
-    createPassWithDebtTransfer(email, 10, null, (createErr) => {
-      if (createErr) {
+  const normalizedEmail = String(email).toLowerCase().trim();
+  db.get(
+    "SELECT email FROM users WHERE LOWER(email) = ?",
+    [normalizedEmail],
+    (err, row) => {
+      if (err) {
         return res.status(500).json({ error: "Database error" });
       }
-      return res.json({ ok: true, total: 10 });
-    });
-  });
+      if (!row) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const userEmail = row.email;
+      // Régi bérlet és felhasznált alkalmak száma az adósságszámításhoz
+      db.get(
+        "SELECT id, total FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
+        [userEmail],
+        (passErr, oldPass) => {
+          if (passErr) {
+            return res.status(500).json({ error: "Database error" });
+          }
+          const calcDebt = (oldUsed, oldTotal) =>
+            Math.max(0, oldUsed - (oldTotal || 0));
+
+          const doCreate = (debt) => {
+            const createdAt = new Date().toISOString();
+            const newRemaining = 10 - debt;
+            db.run(
+              "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, 10, ?, ?)",
+              [userEmail, newRemaining, createdAt],
+              function onInsert(insertErr) {
+                if (insertErr) {
+                  return res.status(500).json({ error: "Database error" });
+                }
+                const newPassId = this.lastID;
+                if (debt <= 0) {
+                  return res.json({ ok: true, total: 10, debt: 0 });
+                }
+                // Adósság bejegyzések az új bérletbe (régi pass_uses NEM törlődnek)
+                const now = new Date().toISOString();
+                let pending = debt;
+                let failed = false;
+                for (let i = 0; i < debt; i++) {
+                  db.run(
+                    "INSERT INTO pass_uses (pass_id, used_at) VALUES (?, ?)",
+                    [newPassId, now],
+                    (useErr) => {
+                      if (useErr && !failed) {
+                        failed = true;
+                        return res
+                          .status(500)
+                          .json({ error: "Database error" });
+                      }
+                      pending--;
+                      if (pending === 0 && !failed) {
+                        return res.json({ ok: true, total: 10, debt });
+                      }
+                    },
+                  );
+                }
+              },
+            );
+          };
+
+          if (!oldPass) {
+            return doCreate(0);
+          }
+          db.get(
+            "SELECT COUNT(*) AS cnt FROM pass_uses WHERE pass_id = ?",
+            [oldPass.id],
+            (cntErr, cntRow) => {
+              if (cntErr) {
+                return res.status(500).json({ error: "Database error" });
+              }
+              const oldUsed = cntRow ? cntRow.cnt : 0;
+              doCreate(calcDebt(oldUsed, oldPass.total));
+            },
+          );
+        },
+      );
+    },
+  );
 });
 
 app.get("/api/admin/passes/:email", requireAdmin, (req, res) => {
@@ -1584,7 +1651,7 @@ app.get("/api/admin/passes/:email", requireAdmin, (req, res) => {
         return res.json({ pass: null, uses: [] });
       }
       db.all(
-        `SELECT pu.id, pu.used_at, c.title, c.starts_at
+        `SELECT pu.id, pu.used_at, pu.class_id, c.title, c.starts_at
          FROM pass_uses pu
          LEFT JOIN classes c ON pu.class_id = c.id
          WHERE pu.pass_id = ?
@@ -1604,7 +1671,8 @@ app.get("/api/admin/passes/:email", requireAdmin, (req, res) => {
             uses: useRows.map((row) => ({
               id: row.id,
               usedAt: row.used_at,
-              title: row.title || "Alkalom",
+              title:
+                row.title || (row.class_id ? "Alkalom" : "Átvitt tartozás"),
               startsAt: row.starts_at || row.used_at,
             })),
           });
