@@ -2723,18 +2723,42 @@ app.get("/api/admin/notifications", requireAdmin, (req, res) => {
 
 // Archívum: Összes eltérő hét listázása
 app.get("/api/admin/archive/weeks", requireAdmin, (req, res) => {
-  const sql = IS_POSTGRES
-    ? `SELECT
-         DATE_TRUNC('week', CAST(c.starts_at AS timestamptz))::date as week_start,
-         COUNT(DISTINCT c.id) as class_count,
-         COUNT(DISTINCT CASE WHEN s.status = 'confirmed' THEN s.id END) as total_signups,
-         MIN(c.starts_at) as first_class
-       FROM classes c
-       LEFT JOIN signups s ON s.class_id = c.id
-       GROUP BY DATE_TRUNC('week', CAST(c.starts_at AS timestamptz))::date
-       ORDER BY DATE_TRUNC('week', CAST(c.starts_at AS timestamptz)) DESC
-       LIMIT 12`
-    : `SELECT DISTINCT 
+  if (IS_POSTGRES) {
+    pgPool
+      .query(
+        `SELECT
+           DATE_TRUNC('week', LEFT(c.starts_at, 10)::date)::date AS week_start,
+           COUNT(DISTINCT c.id) AS class_count,
+           COUNT(DISTINCT CASE WHEN s.status = 'confirmed' THEN s.id END) AS total_signups
+         FROM classes c
+         LEFT JOIN signups s ON s.class_id = c.id
+         GROUP BY DATE_TRUNC('week', LEFT(c.starts_at, 10)::date)::date
+         ORDER BY DATE_TRUNC('week', LEFT(c.starts_at, 10)::date)::date DESC
+         LIMIT 12`,
+      )
+      .then((result) => {
+        const weeks = (result.rows || []).map((row) => {
+          const weekDate =
+            row.week_start instanceof Date
+              ? row.week_start.toISOString().slice(0, 10)
+              : String(row.week_start).slice(0, 10);
+          return {
+            weekDate: weekDate,
+            weekLabel: formatWeekLabel(new Date(weekDate + "T00:00:00Z")),
+            classCount: row.class_count,
+            totalSignups: row.total_signups,
+          };
+        });
+        return res.json(weeks);
+      })
+      .catch((err) => {
+        console.error("Archive weeks PG error:", err);
+        return res
+          .status(500)
+          .json({ error: "Database error", detail: err.message });
+      });
+  } else {
+    const sql = `SELECT DISTINCT 
          DATE(c.starts_at, 'weekday 1') as week_start,
          COUNT(DISTINCT c.id) as class_count,
          COUNT(DISTINCT CASE WHEN s.status = 'confirmed' THEN s.id END) as total_signups,
@@ -2744,23 +2768,25 @@ app.get("/api/admin/archive/weeks", requireAdmin, (req, res) => {
        GROUP BY DATE(c.starts_at, 'weekday 1')
        ORDER BY DATE(c.starts_at, 'weekday 1') DESC
        LIMIT 12`;
-
-  db.all(sql, [], (err, rows) => {
-    if (err) {
-      console.error("Archive weeks DB error:", err);
-      return res.status(500).json({ error: "Database error", detail: err.message });
-    }
-    const weeks = (rows || []).map((row) => {
-      const weekDate = row.week_start;
-      return {
-        weekDate: weekDate,
-        weekLabel: formatWeekLabel(new Date(weekDate + "T00:00:00Z")),
-        classCount: row.class_count,
-        totalSignups: row.total_signups,
-      };
+    db.all(sql, [], (err, rows) => {
+      if (err) {
+        console.error("Archive weeks SQLite error:", err);
+        return res
+          .status(500)
+          .json({ error: "Database error", detail: err.message });
+      }
+      const weeks = (rows || []).map((row) => {
+        const weekDate = row.week_start;
+        return {
+          weekDate: weekDate,
+          weekLabel: formatWeekLabel(new Date(weekDate + "T00:00:00Z")),
+          classCount: row.class_count,
+          totalSignups: row.total_signups,
+        };
+      });
+      return res.json(weeks);
     });
-    return res.json(weeks);
-  });
+  }
 });
 
 // Archívum: Egy adott hét összes órája és bejelentkezései
