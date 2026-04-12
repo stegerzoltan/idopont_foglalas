@@ -11,6 +11,7 @@ const sqlite3 = require("sqlite3").verbose();
 const crypto = require("crypto");
 const webpush = require("web-push");
 const PDFDocument = require("pdfkit");
+const Stripe = require("stripe");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,6 +22,14 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 const CLASS_LOCATION = "5700, Gyula, Csabai út 3";
 const IS_POSTGRES = Boolean(process.env.DATABASE_URL);
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
+const STRIPE_PUBLISHABLE_KEY =
+  process.env.STRIPE_PUBLISHABLE_KEY ||
+  "pk_live_51TLN8BDZ3N3v2ropcECFUzBGKimW0X7ba8e3ou95nCBuam1UoJP3oJ4bOhYpdPwc9mCAEcLhVTxRQn0LACudSiHN00hcNgsf70";
+const STRIPE_PRICE_ID =
+  process.env.STRIPE_PRICE_ID || "price_1TLQ8FDZ3N3v2ropGy5YusNG";
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
+const stripe = STRIPE_SECRET_KEY ? Stripe(STRIPE_SECRET_KEY) : null;
 let vapidKeys = {
   publicKey: process.env.VAPID_PUBLIC_KEY,
   privateKey: process.env.VAPID_PRIVATE_KEY,
@@ -40,6 +49,8 @@ webpush.setVapidDetails(
 );
 
 app.use(express.urlencoded({ extended: false }));
+// Stripe webhook needs the raw body for signature verification – register before express.json()
+app.use("/stripe/webhook", express.raw({ type: "application/json" }));
 app.use(express.json());
 
 // Trust reverse proxy (Render, Heroku, etc.) so that secure cookies work over HTTPS
@@ -288,6 +299,12 @@ const initDb = async () => {
     );
     // Remove pass_used column if it exists (cleanup from old schema)
     await pgPool.query(`ALTER TABLE pass_uses DROP COLUMN IF EXISTS pass_used`);
+    // Add stripe_session_id column if not present
+    await pgPool
+      .query(
+        `ALTER TABLE passes ADD COLUMN IF NOT EXISTS stripe_session_id TEXT UNIQUE`,
+      )
+      .catch(() => {});
     // Ensure class_id is nullable (migration from old schema)
     await pgPool
       .query(`ALTER TABLE pass_uses ALTER COLUMN class_id DROP NOT NULL`)
@@ -409,6 +426,7 @@ const initDb = async () => {
         () => {},
       );
       db.run("ALTER TABLE classes ADD COLUMN location TEXT", () => {});
+      db.run("ALTER TABLE passes ADD COLUMN stripe_session_id TEXT", () => {});
       // Migration: Safe migration of pass_uses table to make class_id nullable
       db.run(`PRAGMA table_info(pass_uses)`, (infoErr, cols) => {
         if (infoErr || !cols) {
@@ -2998,6 +3016,145 @@ app.get(
 
 app.get("/health", (req, res) => {
   res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Stripe payment
+// ---------------------------------------------------------------------------
+
+app.get("/api/stripe/config", (req, res) => {
+  res.json({
+    publishableKey: STRIPE_PUBLISHABLE_KEY,
+    priceId: STRIPE_PRICE_ID,
+  });
+});
+
+app.post(
+  "/api/stripe/create-checkout-session",
+  requireUser,
+  async (req, res) => {
+    if (!stripe) {
+      return res
+        .status(503)
+        .json({ error: "Stripe nincs konfigurálva a szerveren." });
+    }
+    const userEmail = req.session.user.email;
+    const origin = `${req.protocol}://${req.get("host")}`;
+    try {
+      const checkoutSession = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+        mode: "payment",
+        customer_email: userEmail,
+        client_reference_id: userEmail,
+        success_url: `${origin}/stripe/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}/`,
+      });
+      return res.json({ url: checkoutSession.url });
+    } catch (err) {
+      console.error("Stripe session creation error:", err);
+      return res
+        .status(500)
+        .json({ error: "Nem sikerült a fizetési folyamat elindítása." });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Shared helper: assign a 10-session pass to a user by Stripe session ID
+// ---------------------------------------------------------------------------
+const assignPassForStripeSession = (stripeSessionId, userEmail, cb) => {
+  db.get(
+    "SELECT id FROM passes WHERE stripe_session_id = ?",
+    [stripeSessionId],
+    (err, existing) => {
+      if (err) return cb(err);
+      if (existing) return cb(null, false); // already processed
+      const createdAt = new Date().toISOString();
+      db.run(
+        "INSERT INTO passes (user_email, total, remaining, created_at, stripe_session_id) VALUES (?, ?, ?, ?, ?)",
+        [userEmail, 10, 10, createdAt, stripeSessionId],
+        function onInsert(insertErr) {
+          if (insertErr) return cb(insertErr);
+          console.log(
+            `Pass assigned to ${userEmail} via Stripe session ${stripeSessionId}`,
+          );
+          return cb(null, true);
+        },
+      );
+    },
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Stripe webhook (primary, reliable)
+// ---------------------------------------------------------------------------
+app.post("/stripe/webhook", (req, res) => {
+  if (!stripe) {
+    return res.status(503).send("Stripe not configured");
+  }
+  const sig = req.headers["stripe-signature"];
+  if (!sig || !STRIPE_WEBHOOK_SECRET) {
+    console.warn("Stripe webhook: missing signature or secret");
+    return res.status(400).send("Missing signature");
+  }
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      sig,
+      STRIPE_WEBHOOK_SECRET,
+    );
+  } catch (err) {
+    console.error("Stripe webhook signature verification failed:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+    if (session.payment_status === "paid" && session.client_reference_id) {
+      assignPassForStripeSession(
+        session.id,
+        session.client_reference_id,
+        (err) => {
+          if (err) {
+            console.error("Webhook: pass assignment error:", err);
+          }
+        },
+      );
+    }
+  }
+  return res.json({ received: true });
+});
+
+app.get("/stripe/success", async (req, res) => {
+  if (!stripe) {
+    return res.redirect("/");
+  }
+  const { session_id } = req.query;
+  if (!session_id || !session_id.startsWith("cs_")) {
+    return res.redirect("/");
+  }
+  try {
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+    if (session.payment_status !== "paid") {
+      return res.redirect("/?stripe=cancelled");
+    }
+    const userEmail = session.client_reference_id;
+    if (!userEmail) {
+      return res.redirect("/");
+    }
+    // Idempotency: use the same helper as the webhook
+    assignPassForStripeSession(session_id, userEmail, (err) => {
+      if (err) {
+        console.error("Success redirect: pass assignment error:", err);
+        return res.redirect("/");
+      }
+      return res.redirect("/?stripe=success");
+    });
+  } catch (err) {
+    console.error("Stripe success handler error:", err);
+    return res.redirect("/");
+  }
 });
 
 initDb()

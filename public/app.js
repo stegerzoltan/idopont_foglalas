@@ -59,6 +59,8 @@ const closeSignups = document.getElementById("close-signups");
 const signupsList = document.getElementById("signups-list");
 const dayMenu = document.getElementById("day-menu");
 const scrollTopButton = document.getElementById("scroll-top");
+const buyPassButton = document.getElementById("buy-pass-button");
+const buyPassMessage = document.getElementById("buy-pass-message");
 const passAdminEmail = document.getElementById("pass-admin-email");
 const loadPassAdminButton = document.getElementById("load-pass-admin");
 const assignPassButton = document.getElementById("assign-pass");
@@ -2105,6 +2107,37 @@ userLogoutButton?.addEventListener("click", async () => {
 closeSignups?.addEventListener("click", () => closeModal(signupsModal));
 closePass?.addEventListener("click", () => closeModal(passModal));
 
+buyPassButton?.addEventListener("click", async () => {
+  if (!currentUser) {
+    if (buyPassMessage)
+      buyPassMessage.textContent = "Kérjül lépj be a vásárláshoz.";
+    return;
+  }
+  if (buyPassMessage) buyPassMessage.textContent = "";
+  buyPassButton.disabled = true;
+  buyPassButton.textContent = "Átirányítás...";
+  try {
+    const resp = await apiFetch("/api/stripe/create-checkout-session", {
+      method: "POST",
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      if (buyPassMessage)
+        buyPassMessage.textContent =
+          err.error || "Nem sikerült a fizetés elindítása.";
+      buyPassButton.disabled = false;
+      buyPassButton.textContent = "Bérlet vásárlása";
+      return;
+    }
+    const { url } = await resp.json();
+    window.location.href = url;
+  } catch {
+    if (buyPassMessage) buyPassMessage.textContent = "Hálózati hiba történt.";
+    buyPassButton.disabled = false;
+    buyPassButton.textContent = "Bérlet vásárlása";
+  }
+});
+
 authLoginButton?.addEventListener("click", () => setAuthMode("login"));
 authRegisterButton?.addEventListener("click", () => setAuthMode("register"));
 
@@ -2175,6 +2208,11 @@ window.addEventListener("DOMContentLoaded", () => {
   }
   if (shouldOpenAdminFromUrl()) {
     openAdminLogin();
+  }
+  const stripeParam = new URLSearchParams(window.location.search).get("stripe");
+  if (stripeParam === "success") {
+    history.replaceState(null, "", "/");
+    loadPass().then(() => openModal(passModal));
   }
 });
 

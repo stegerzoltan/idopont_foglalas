@@ -380,6 +380,35 @@ body.modal-open .quick-menu {
     width: 100%;
     margin-left: 0;
     margin-right: 0;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .site-nav {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .modal {
+    padding: 0.75rem;
+    align-items: flex-end;
+  }
+
+  .modal-content {
+    border-radius: 20px 20px 16px 16px;
+    max-height: 92vh;
+    animation: mobileLift 0.28s ease;
+  }
+
+  .pass-buy-section {
+    padding: 0.85rem;
+  }
+
+  .pass-buy-section button.primary {
+    width: 100%;
+    text-align: center;
   }
 
   .calendar-wrap {
@@ -950,6 +979,22 @@ input, textarea {
   margin-right: 0.5rem;
 }
 
+.pass-buy-section {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 14px;
+  border: 1px solid rgba(43, 31, 23, 0.12);
+}
+
+.pass-buy-section h4 {
+  margin: 0 0 0.25rem;
+}
+
+.pass-buy-section .helper {
+  margin: 0.35rem 0 0.75rem;
+}
+
 .pass-table {
   width: 100%;
   border-collapse: collapse;
@@ -1033,6 +1078,38 @@ input, textarea {
 @media (min-width: 721px) {
   .quick-menu {
     display: none;
+  }
+}
+
+@media (max-width: 400px) {
+  .site-header {
+    padding: 1rem 4vw;
+  }
+
+  .brand h1 {
+    font-size: 1.4rem;
+  }
+
+  .brand-kicker {
+    font-size: 0.6rem;
+  }
+
+  .modal {
+    padding: 0.5rem;
+  }
+
+  .modal-content {
+    padding: 1.1rem;
+    border-radius: 18px 18px 12px 12px;
+  }
+
+  .pass-buy-section {
+    padding: 0.7rem;
+  }
+
+  .site-nav button {
+    font-size: 0.78rem;
+    padding: 0.35rem 0.65rem;
   }
 }
 
