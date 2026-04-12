@@ -2588,14 +2588,25 @@ app.post("/api/admin/signups/:id/cancel", requireAdmin, (req, res) => {
 app.get("/api/admin/archive/week-pdf/:weekDate", requireAdmin, (req, res) => {
   const weekDate = req.params.weekDate; // YYYY-MM-DD format expected
 
+  // Calculate full week range (Monday 00:00 – Sunday 23:59:59)
+  const weekStartDate = new Date(weekDate + "T00:00:00Z");
+  const dayOfWeek = weekStartDate.getUTCDay();
+  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  weekStartDate.setUTCDate(weekStartDate.getUTCDate() - daysToMonday);
+  const weekEndDate = new Date(weekStartDate);
+  weekEndDate.setUTCDate(weekEndDate.getUTCDate() + 6);
+  weekEndDate.setUTCHours(23, 59, 59, 999);
+  const weekStart = weekStartDate.toISOString();
+  const weekEnd = weekEndDate.toISOString();
+
   db.all(
     `SELECT c.*, (
       SELECT COUNT(*) FROM signups s WHERE s.class_id = c.id AND s.status = 'confirmed'
     ) AS confirmed_count
     FROM classes c
-    WHERE DATE(c.starts_at) = ?
+    WHERE c.starts_at >= ? AND c.starts_at <= ?
     ORDER BY c.starts_at ASC`,
-    [weekDate],
+    [weekStart, weekEnd],
     (err, rows) => {
       if (err) {
         return res.status(500).json({ error: "Database error" });
@@ -2651,55 +2662,172 @@ app.get("/api/admin/archive/week-pdf/:weekDate", requireAdmin, (req, res) => {
           });
           doc.pipe(res);
 
-          // Title
-          doc.fontSize(20).text(`Órarend: ${weekDate}`, { align: "center" });
-          doc.fontSize(12).text(`Összes feliratkozás: ${signRows.length}`, {
-            align: "center",
-          });
-          doc.moveDown();
+          const PAGE_WIDTH = doc.page.width;
+          const MARGIN = 40;
+          const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+          const ORANGE = "#E8612C";
+          const LIGHT_GRAY = "#F5F5F5";
+          const BORDER_GRAY = "#DDDDDD";
+          const TEXT_DARK = "#222222";
+          const TEXT_MUTED = "#666666";
 
-          // Classes
-          rows.forEach((row, idx) => {
+          // ── Fejléc ──────────────────────────────────────────────
+          doc.rect(MARGIN, 30, CONTENT_WIDTH, 50).fill(ORANGE);
+          doc
+            .fillColor("#FFFFFF")
+            .fontSize(18)
+            .font("Helvetica-Bold")
+            .text("Időpontfoglalás – Archívum", MARGIN + 10, 42, {
+              width: CONTENT_WIDTH - 20,
+            });
+
+          const weekStartStr = weekStartDate.toLocaleDateString("hu-HU", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            timeZone: "UTC",
+          });
+          const weekEndStr = weekEndDate.toLocaleDateString("hu-HU", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            timeZone: "UTC",
+          });
+          doc
+            .fillColor("#FFFFFF")
+            .fontSize(10)
+            .font("Helvetica")
+            .text(`${weekStartStr} – ${weekEndStr}`, MARGIN + 10, 62, {
+              width: CONTENT_WIDTH - 20,
+            });
+
+          doc.moveDown(2);
+
+          // ── Összesítő sor ──────────────────────────────────────
+          doc
+            .fillColor(TEXT_MUTED)
+            .fontSize(9)
+            .font("Helvetica")
+            .text(
+              `${rows.length} óra  •  ${signRows.length} feliratkozás összesen`,
+              MARGIN,
+              doc.y,
+              { align: "right", width: CONTENT_WIDTH },
+            );
+          doc.moveDown(0.5);
+
+          // ── Kártyák ────────────────────────────────────────────
+          rows.forEach((row) => {
             const signups = signupsByClass.get(row.id) || [];
             const startDate = new Date(row.starts_at);
+            const dateStr = startDate.toLocaleDateString("hu-HU", {
+              weekday: "long",
+              month: "long",
+              day: "numeric",
+            });
             const timeStr = startDate.toLocaleTimeString("hu-HU", {
               hour: "2-digit",
               minute: "2-digit",
             });
-            const dateStr = startDate.toLocaleDateString("hu-HU");
 
-            doc
-              .fontSize(12)
-              .text(`${idx + 1}. ${row.title}`, { underline: true });
-            doc
-              .fontSize(10)
-              .text(`Idő: ${dateStr} ${timeStr}`)
-              .text(`Edző: ${row.coach || "N/A"}`)
-              .text(`Helyek: ${signups.length}/${row.capacity}`)
-              .text(`Helyszín: ${row.location || "N/A"}`);
-
-            if (row.notes) {
-              doc.text(`Megjegyzés: ${row.notes}`);
+            // Becsüljük a kártya magasságát – ha nem fér el, új oldal
+            const cardHeight =
+              58 + signups.length * 14 + (signups.length === 0 ? 14 : 0);
+            if (doc.y + cardHeight > doc.page.height - MARGIN - 20) {
+              doc.addPage();
             }
+
+            const cardY = doc.y;
+
+            // Kártya háttér
+            doc.rect(MARGIN, cardY, CONTENT_WIDTH, cardHeight).fill(LIGHT_GRAY);
+            // Kártya keret
+            doc
+              .rect(MARGIN, cardY, CONTENT_WIDTH, cardHeight)
+              .stroke(BORDER_GRAY);
+            // Narancs bal oldali csík
+            doc.rect(MARGIN, cardY, 4, cardHeight).fill(ORANGE);
+
+            const textX = MARGIN + 14;
+            const textWidth = CONTENT_WIDTH - 18;
+
+            // Óra neve
+            doc
+              .fillColor(TEXT_DARK)
+              .fontSize(11)
+              .font("Helvetica-Bold")
+              .text(row.title, textX, cardY + 10, { width: textWidth });
+
+            // Meta sor
+            const metaParts = [];
+            metaParts.push(`${dateStr}  ${timeStr}`);
+            if (row.coach) metaParts.push(`Edző: ${row.coach}`);
+            if (row.location) metaParts.push(`📍 ${row.location}`);
+            metaParts.push(`${signups.length} / ${row.capacity} fő`);
+
+            doc
+              .fillColor(TEXT_MUTED)
+              .fontSize(8.5)
+              .font("Helvetica")
+              .text(metaParts.join("   •   "), textX, cardY + 26, {
+                width: textWidth,
+              });
+
+            // Elválasztó vonal
+            const divY = cardY + 40;
+            doc
+              .moveTo(textX, divY)
+              .lineTo(MARGIN + CONTENT_WIDTH - 6, divY)
+              .stroke(BORDER_GRAY);
+
+            // Feliratkozók
+            doc
+              .fillColor(TEXT_DARK)
+              .fontSize(8)
+              .font("Helvetica-Bold")
+              .text(`Feliratkozók (${signups.length}):`, textX, divY + 5, {
+                width: textWidth,
+              });
 
             if (signups.length > 0) {
-              doc.fontSize(9).text("Feliratkozók:");
-              signups.forEach((sig) => {
-                doc.text(`  • ${sig.name} (${sig.email})`);
+              signups.forEach((sig, i) => {
+                doc
+                  .fillColor(TEXT_DARK)
+                  .fontSize(8)
+                  .font("Helvetica")
+                  .text(
+                    `${i + 1}.  ${sig.name}`,
+                    textX + 6,
+                    divY + 16 + i * 14,
+                    { width: textWidth * 0.4, continued: true },
+                  )
+                  .fillColor(TEXT_MUTED)
+                  .text(`  ${sig.email}`, { width: textWidth * 0.55 });
               });
             } else {
-              doc.fontSize(9).text("Nincsenek feliratkozások.");
+              doc
+                .fillColor(TEXT_MUTED)
+                .fontSize(8)
+                .font("Helvetica")
+                .text("Nincs feliratkozás.", textX + 6, divY + 16, {
+                  width: textWidth,
+                });
             }
 
-            doc.moveDown();
+            doc.y = cardY + cardHeight + 8;
           });
 
-          // Footer
+          // ── Lábléc ─────────────────────────────────────────────
           doc
-            .fontSize(8)
-            .text(`Generálva: ${new Date().toLocaleString("hu-HU")}`, {
-              align: "center",
-            });
+            .fillColor(TEXT_MUTED)
+            .fontSize(7.5)
+            .font("Helvetica")
+            .text(
+              `Generálva: ${new Date().toLocaleString("hu-HU")}`,
+              MARGIN,
+              doc.y + 6,
+              { align: "center", width: CONTENT_WIDTH },
+            );
 
           doc.end();
         },

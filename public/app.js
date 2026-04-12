@@ -736,8 +736,9 @@ const renderArchiveWeekClasses = (classes, weekDate) => {
   });
   adminArchiveDetail.appendChild(downloadBtn);
 
-  const wrapper = document.createElement("div");
-  wrapper.style.marginTop = "20px";
+  const grid = document.createElement("div");
+  grid.className = "card-grid";
+  grid.style.marginTop = "1rem";
 
   classes.forEach((cls) => {
     const card = document.createElement("div");
@@ -747,23 +748,34 @@ const renderArchiveWeekClasses = (classes, weekDate) => {
     card.innerHTML = `
       <h4>${cls.title}</h4>
       <div class="meta">
-        <span>${cls.coach ? `Edző: ${cls.coach}` : ""}</span>
+        ${cls.coach ? `<span>Edző: ${cls.coach}</span>` : ""}
         <span>${formatDate(cls.startsAt)}</span>
-        <span>${signups.length}/${cls.capacity} fő</span>
+        <span>${signups.length} / ${cls.capacity} fő</span>
+        ${cls.location ? `<span>📍 ${cls.location}</span>` : ""}
       </div>
-      ${cls.notes ? `<p>${cls.notes}</p>` : ""}
-      <div class="signups-list">
-        <strong>Feliratkozottak:</strong>
-        ${
-          signups.length > 0
-            ? `<ul>${signups.map((s) => `<li>${s.name} (${s.email})</li>`).join("")}</ul>`
-            : "<p>Nincs feliratkozás.</p>"
-        }
+      ${cls.notes ? `<p class="helper">${cls.notes}</p>` : ""}
+      <div class="stack" style="margin-top:0.5rem">
+        <strong>Feliratkozók (${signups.length})</strong>
+        <div class="stack">
+          ${
+            signups.length > 0
+              ? signups
+                  .map(
+                    (s) => `
+                <div class="meta" style="padding:0.25rem 0;border-bottom:1px solid var(--border)">
+                  <span>${s.name}</span>
+                  <span style="color:var(--text-muted);font-size:0.85rem">${s.email}</span>
+                </div>`,
+                  )
+                  .join("")
+              : `<p class="helper">Nincs feliratkozás.</p>`
+          }
+        </div>
       </div>
     `;
-    wrapper.appendChild(card);
+    grid.appendChild(card);
   });
-  adminArchiveDetail.appendChild(wrapper);
+  adminArchiveDetail.appendChild(grid);
 };
 
 const renderAdminClasses = (classes) => {
