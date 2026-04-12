@@ -2724,15 +2724,15 @@ app.get("/api/admin/notifications", requireAdmin, (req, res) => {
 // Archívum: Összes eltérő hét listázása
 app.get("/api/admin/archive/weeks", requireAdmin, (req, res) => {
   const sql = IS_POSTGRES
-    ? `SELECT DISTINCT 
-         DATE_TRUNC('week', c.starts_at::timestamp)::date as week_start,
+    ? `SELECT
+         DATE_TRUNC('week', CAST(c.starts_at AS timestamptz))::date as week_start,
          COUNT(DISTINCT c.id) as class_count,
          COUNT(DISTINCT CASE WHEN s.status = 'confirmed' THEN s.id END) as total_signups,
          MIN(c.starts_at) as first_class
        FROM classes c
        LEFT JOIN signups s ON s.class_id = c.id
-       GROUP BY DATE_TRUNC('week', c.starts_at::timestamp)::date
-       ORDER BY DATE_TRUNC('week', c.starts_at::timestamp) DESC
+       GROUP BY DATE_TRUNC('week', CAST(c.starts_at AS timestamptz))::date
+       ORDER BY DATE_TRUNC('week', CAST(c.starts_at AS timestamptz)) DESC
        LIMIT 12`
     : `SELECT DISTINCT 
          DATE(c.starts_at, 'weekday 1') as week_start,
@@ -2747,7 +2747,8 @@ app.get("/api/admin/archive/weeks", requireAdmin, (req, res) => {
 
   db.all(sql, [], (err, rows) => {
     if (err) {
-      return res.status(500).json({ error: "Database error" });
+      console.error("Archive weeks DB error:", err);
+      return res.status(500).json({ error: "Database error", detail: err.message });
     }
     const weeks = (rows || []).map((row) => {
       const weekDate = row.week_start;
