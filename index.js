@@ -2725,14 +2725,14 @@ app.get("/api/admin/notifications", requireAdmin, (req, res) => {
 app.get("/api/admin/archive/weeks", requireAdmin, (req, res) => {
   const sql = IS_POSTGRES
     ? `SELECT DISTINCT 
-         DATE_TRUNC('week', c.starts_at)::date as week_start,
+         DATE_TRUNC('week', c.starts_at::timestamp)::date as week_start,
          COUNT(DISTINCT c.id) as class_count,
          COUNT(DISTINCT CASE WHEN s.status = 'confirmed' THEN s.id END) as total_signups,
          MIN(c.starts_at) as first_class
        FROM classes c
        LEFT JOIN signups s ON s.class_id = c.id
-       GROUP BY DATE_TRUNC('week', c.starts_at)::date
-       ORDER BY DATE_TRUNC('week', c.starts_at) DESC
+       GROUP BY DATE_TRUNC('week', c.starts_at::timestamp)::date
+       ORDER BY DATE_TRUNC('week', c.starts_at::timestamp) DESC
        LIMIT 12`
     : `SELECT DISTINCT 
          DATE(c.starts_at, 'weekday 1') as week_start,
