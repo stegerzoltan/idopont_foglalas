@@ -324,6 +324,13 @@ const initDb = async () => {
         updated_at TEXT NOT NULL
       )`,
     );
+    await pgPool.query(
+      `CREATE TABLE IF NOT EXISTS seed_exclusions (
+        id SERIAL PRIMARY KEY,
+        starts_at TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+      )`,
+    );
     return;
   }
 
@@ -414,6 +421,13 @@ const initDb = async () => {
           calendar_id TEXT NOT NULL DEFAULT 'primary',
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
+        )`,
+      );
+      db.run(
+        `CREATE TABLE IF NOT EXISTS seed_exclusions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          starts_at TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL
         )`,
       );
       db.run("ALTER TABLE users ADD COLUMN phone TEXT", () => {});
@@ -798,53 +812,68 @@ const seedWeeklyClasses = () => {
   weekEnd.setDate(weekStart.getDate() + 7);
 
   db.all(
-    "SELECT starts_at FROM classes WHERE starts_at >= ? AND starts_at < ?",
+    "SELECT starts_at FROM seed_exclusions WHERE starts_at >= ? AND starts_at < ?",
     [weekStart.toISOString(), weekEnd.toISOString()],
-    (err, rows) => {
-      if (err) {
+    (exclErr, exclRows) => {
+      if (exclErr) {
         return;
       }
+      const excludedSlots = new Set((exclRows || []).map((r) => r.starts_at));
 
-      const existingSlots = new Set();
-      (rows || []).forEach((row) => {
-        const startsAt = new Date(row.starts_at);
-        const weekday = startsAt.getDay();
-        const time = `${String(startsAt.getHours()).padStart(2, "0")}:${String(
-          startsAt.getMinutes(),
-        ).padStart(2, "0")}`;
-        if (weekday >= 1 && weekday <= 5) {
-          existingSlots.add(`${weekday}-${time}`);
-        }
-      });
-
-      const stmt = db.prepare(
-        "INSERT INTO classes (title, coach, starts_at, capacity, notes, location) VALUES (?, ?, ?, ?, ?, ?)",
-      );
-
-      WEEK_DAYS.forEach((day) => {
-        TIME_SLOTS.forEach((time) => {
-          if (day.key === 5 && FRIDAY_DISABLED_SLOTS.has(time)) {
+      db.all(
+        "SELECT starts_at FROM classes WHERE starts_at >= ? AND starts_at < ?",
+        [weekStart.toISOString(), weekEnd.toISOString()],
+        (err, rows) => {
+          if (err) {
             return;
           }
-          if (existingSlots.has(`${day.key}-${time}`)) {
-            return;
-          }
-          const [hour, minute] = time.split(":").map(Number);
-          const startsAt = new Date(weekStart);
-          startsAt.setDate(weekStart.getDate() + (day.key - 1));
-          startsAt.setHours(hour, minute, 0, 0);
-          stmt.run(
-            "Edzés MuscleFit",
-            "Zoltan",
-            startsAt.toISOString(),
-            MAX_SIGNUPS,
-            "",
-            "5700 Gyula, Csabai út 3.",
+
+          const existingSlots = new Set();
+          (rows || []).forEach((row) => {
+            const startsAt = new Date(row.starts_at);
+            const weekday = startsAt.getDay();
+            const time = `${String(startsAt.getHours()).padStart(2, "0")}:${String(
+              startsAt.getMinutes(),
+            ).padStart(2, "0")}`;
+            if (weekday >= 1 && weekday <= 5) {
+              existingSlots.add(`${weekday}-${time}`);
+            }
+          });
+
+          const stmt = db.prepare(
+            "INSERT INTO classes (title, coach, starts_at, capacity, notes, location) VALUES (?, ?, ?, ?, ?, ?)",
           );
-        });
-      });
 
-      stmt.finalize();
+          WEEK_DAYS.forEach((day) => {
+            TIME_SLOTS.forEach((time) => {
+              if (day.key === 5 && FRIDAY_DISABLED_SLOTS.has(time)) {
+                return;
+              }
+              if (existingSlots.has(`${day.key}-${time}`)) {
+                return;
+              }
+              const [hour, minute] = time.split(":").map(Number);
+              const startsAt = new Date(weekStart);
+              startsAt.setDate(weekStart.getDate() + (day.key - 1));
+              startsAt.setHours(hour, minute, 0, 0);
+              // Admin által manuálisan törölt slot – nem írjuk vissza
+              if (excludedSlots.has(startsAt.toISOString())) {
+                return;
+              }
+              stmt.run(
+                "Edzés MuscleFit",
+                "Zoltan",
+                startsAt.toISOString(),
+                MAX_SIGNUPS,
+                "",
+                "5700 Gyula, Csabai út 3.",
+              );
+            });
+          });
+
+          stmt.finalize();
+        },
+      );
     },
   );
 };
@@ -2504,6 +2533,11 @@ app.delete("/api/admin/classes/:id", requireAdmin, (req, res) => {
                               createNotification("cancel", message);
                               sendTelegramMessage(message);
                             }
+                            // Megjegyezzük, hogy ezt az időpontot ne írja vissza a seed
+                            db.run(
+                              "INSERT INTO seed_exclusions (starts_at, created_at) VALUES (?, ?) ON CONFLICT (starts_at) DO NOTHING",
+                              [classRow.starts_at, new Date().toISOString()],
+                            );
                             return res.json({ deleted: this.changes });
                           },
                         );

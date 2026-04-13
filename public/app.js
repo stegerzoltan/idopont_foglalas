@@ -74,9 +74,6 @@ const passAdminStatus = document.getElementById("pass-admin-status");
 const adminArchiveToggle = document.getElementById("admin-archive-toggle");
 const adminArchiveWeeks = document.getElementById("admin-archive-weeks");
 const adminArchiveDetail = document.getElementById("admin-archive-detail");
-const greetingBanner = document.getElementById("greeting-banner");
-const greetingLoginButton = document.getElementById("greeting-login-button");
-const greetingCloseButton = document.getElementById("greeting-close-button");
 
 let currentUser = null;
 let lastClasses = [];
@@ -89,25 +86,6 @@ let adminClassesCache = [];
 let adminUsersCache = [];
 let adminClassesOpen = false;
 let adminNotificationsOpen = false;
-
-// Greeting banner helpers
-const hideGreetingBanner = () => {
-  if (!greetingBanner || greetingBanner.hidden) return;
-  greetingBanner.classList.add("is-hiding");
-  setTimeout(() => {
-    greetingBanner.hidden = true;
-    greetingBanner.classList.remove("is-hiding");
-  }, 350);
-};
-
-const showGreetingBanner = () => {
-  if (!greetingBanner) return;
-  greetingBanner.hidden = false;
-};
-
-greetingCloseButton?.addEventListener("click", () => {
-  hideGreetingBanner();
-});
 
 // Easter banner helpers
 const _isEasterPeriod = () => {
@@ -157,7 +135,7 @@ const showEasterBanner = (user) => {
       setAuthMode("login");
       openModal(userModal);
     };
-  setTimeout(() => hideEasterBanner(), 2000);
+  setTimeout(() => hideEasterBanner(), 2500);
 };
 
 const WEEK_DAYS = [
@@ -1861,8 +1839,6 @@ const updateUserUI = () => {
     if (userLogoutSection) {
       userLogoutSection.hidden = true;
     }
-    // Greeting banner megjelenítése nem bejelentkezett állapotban
-    showGreetingBanner();
   }
   signupName.disabled = true;
   signupEmail.disabled = true;
