@@ -1799,7 +1799,19 @@ const updateUserUI = () => {
 
   if (currentUser) {
     userPill.hidden = false;
-    userPill.textContent = `Üdvözöllek, ${currentUser.fullName || currentUser.name || currentUser.email}!`;
+    const _greetName =
+      currentUser.fullName || currentUser.name || currentUser.email;
+    const _now = getBudapestNow();
+    const _day = _now.getDay(); // 0=vas, 4=csüt, 5=pén, 6=szo
+    const _hour = _now.getHours();
+    const _isWeekendGreeting =
+      (_day === 4 && _hour >= 0) || // csütörtök egész nap (éjféltől)
+      _day === 5 || // péntek
+      _day === 6 || // szombat
+      (_day === 0 && _hour < 20); // vasárnap 20:00 előtt
+    userPill.textContent = _isWeekendGreeting
+      ? `Üdvözöllek kedves ${_greetName}! Kellemes hétvégét kívánok!`
+      : `Üdvözöllek kedves ${_greetName}!`;
     userPill.classList.add("is-logged-in");
     openUser.textContent = "Profil";
     if (openSignups) {
