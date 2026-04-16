@@ -1802,8 +1802,6 @@ const updateUserUI = () => {
     userPill.textContent = `Üdvözöllek, ${currentUser.fullName || currentUser.name || currentUser.email}!`;
     userPill.classList.add("is-logged-in");
     openUser.textContent = "Profil";
-    // Greeting banner elrejtése bejelentkezés után
-    hideGreetingBanner();
     if (openSignups) {
       openSignups.hidden = false;
     }
@@ -2230,31 +2228,6 @@ passModal?.addEventListener("click", (event) => {
   }
 });
 
-assignPassButton?.addEventListener("click", async () => {
-  if (!passEmailInput || !passAdminStatus) {
-    return;
-  }
-  passAdminStatus.textContent = "";
-  const email = passEmailInput.value.trim();
-  if (!email) {
-    passAdminStatus.textContent = "Email megadása kötelező.";
-    return;
-  }
-  const response = await apiFetch("/api/admin/passes/assign", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    passAdminStatus.textContent =
-      err.error || "Nem sikerült a bérletet rögzíteni.";
-    return;
-  }
-  passAdminStatus.textContent = "Bérlet rögzítve.";
-  passEmailInput.value = "";
-});
-
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") {
     return;
@@ -2289,15 +2262,11 @@ window.addEventListener("DOMContentLoaded", () => {
   const stripeParam = new URLSearchParams(window.location.search).get("stripe");
   if (stripeParam === "success") {
     history.replaceState(null, "", "/");
-    loadPass().then(() => openModal(passModal));
+    loadPass().then(() => {
+      openModal(passModal);
+      showToast("Bérlet sikeresen vásárolva!", "success", 5000);
+    });
   }
-
-  // Greeting banner: belépés gomb az összes függvény definíciója után
-  greetingLoginButton?.addEventListener("click", () => {
-    hideGreetingBanner();
-    setAuthMode("login");
-    openModal(userModal);
-  });
 });
 
 userPhone?.addEventListener("input", () => {

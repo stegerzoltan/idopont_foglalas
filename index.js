@@ -3214,19 +3214,29 @@ app.post(
 // Shared helper: assign a 10-session pass to a user by Stripe session ID
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// Shared helper: create a new pass, carry over any debt from previous pass,
-// and delete old pass_uses (fresh start for the user)
+// Shared helper: create a new pass for a Stripe purchase.
+//
+// Szabályok:
+//  • Ha van még fel nem használt alkalom (remaining > 0):
+//      → akkumulálás: new_total = old_total + 10, régi pass_uses átkerülnek az új bérletbe
+//      → pl. 3/10 + vásárlás = 3/20 (17 marad)
+//  • Ha a régi bérlet teljesen kimerült (remaining = 0, debt = 0):
+//      → fresh start: new_total = 10, 0 felhasználás
+//  • Ha volt tartozás (debt > 0, remaining = 0):
+//      → fresh start adóssággal: new_total = 10, remaining = 10 - debt
+//      → pl. 12/10 (debt=2) + vásárlás = 2/10 (8 marad)
+//
 // stripeSessionId is optional (null for manual admin assignment)
 // ---------------------------------------------------------------------------
 const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
-  // 1. Find existing pass
   db.get(
     "SELECT id, total FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
     [userEmail],
     (err, oldPass) => {
       if (err) return cb(err);
 
-      const doCreate = (debt) => {
+      // Fresh start bérlet létrehozása (adóssággal vagy anélkül)
+      const createFreshWithDebt = (debt) => {
         const createdAt = new Date().toISOString();
         const newRemaining = total - debt;
         const insertSql = stripeSessionId
@@ -3239,7 +3249,7 @@ const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
           if (insertErr) return cb(insertErr);
           const newPassId = this.lastID;
           if (debt <= 0) return cb(null, true);
-          // Insert debt uses into the new pass
+          // Tartozás bejegyzések az új bérletbe
           const now = new Date().toISOString();
           let pending = debt;
           let failed = false;
@@ -3261,26 +3271,50 @@ const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
       };
 
       if (!oldPass) {
-        return doCreate(0);
+        return createFreshWithDebt(0);
       }
 
-      // Count old uses to determine debt
       db.get(
         "SELECT COUNT(*) AS cnt FROM pass_uses WHERE pass_id = ?",
         [oldPass.id],
         (cntErr, cntRow) => {
           if (cntErr) return cb(cntErr);
-          const oldUsed = cntRow ? cntRow.cnt : 0;
+          const oldUsed = cntRow ? Number(cntRow.cnt) : 0;
+          const oldRemaining = Math.max(0, oldPass.total - oldUsed);
           const debt = Math.max(0, oldUsed - oldPass.total);
-          // Delete old pass_uses
-          db.run(
-            "DELETE FROM pass_uses WHERE pass_id = ?",
-            [oldPass.id],
-            (delErr) => {
-              if (delErr) return cb(delErr);
-              doCreate(debt);
-            },
-          );
+
+          if (oldRemaining > 0) {
+            // Van még fel nem használt alkalom → akkumulálás
+            const newTotal = oldPass.total + total;
+            const newRemaining = newTotal - oldUsed;
+            const createdAt = new Date().toISOString();
+            const insertSql = stripeSessionId
+              ? "INSERT INTO passes (user_email, total, remaining, created_at, stripe_session_id) VALUES (?, ?, ?, ?, ?)"
+              : "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)";
+            const insertParams = stripeSessionId
+              ? [userEmail, newTotal, newRemaining, createdAt, stripeSessionId]
+              : [userEmail, newTotal, newRemaining, createdAt];
+            db.run(insertSql, insertParams, function onInsert(insertErr) {
+              if (insertErr) return cb(insertErr);
+              const newPassId = this.lastID;
+              // Régi pass_uses átmigrálása az új bérlethez
+              db.run(
+                "UPDATE pass_uses SET pass_id = ? WHERE pass_id = ?",
+                [newPassId, oldPass.id],
+                (migrateErr) => cb(migrateErr || null, !migrateErr),
+              );
+            });
+          } else {
+            // Teljesen felhasznált vagy tartozásos bérlet → fresh start
+            db.run(
+              "DELETE FROM pass_uses WHERE pass_id = ?",
+              [oldPass.id],
+              (delErr) => {
+                if (delErr) return cb(delErr);
+                createFreshWithDebt(debt);
+              },
+            );
+          }
         },
       );
     },
