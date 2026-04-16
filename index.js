@@ -331,6 +331,15 @@ const initDb = async () => {
         created_at TEXT NOT NULL
       )`,
     );
+    await pgPool.query(
+      `CREATE TABLE IF NOT EXISTS pass_use_exclusions (
+        id SERIAL PRIMARY KEY,
+        user_email TEXT NOT NULL,
+        class_id INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(user_email, class_id)
+      )`,
+    );
     return;
   }
 
@@ -428,6 +437,15 @@ const initDb = async () => {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           starts_at TEXT NOT NULL UNIQUE,
           created_at TEXT NOT NULL
+        )`,
+      );
+      db.run(
+        `CREATE TABLE IF NOT EXISTS pass_use_exclusions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_email TEXT NOT NULL,
+          class_id INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE(user_email, class_id)
         )`,
       );
       db.run("ALTER TABLE users ADD COLUMN phone TEXT", () => {});
@@ -954,28 +972,38 @@ const processDuePassUses = () => {
               return processNext(index + 1);
             }
             db.get(
-              `SELECT pu.id
-               FROM pass_uses pu
-               JOIN passes p ON pu.pass_id = p.id
-               WHERE p.user_email = ? AND pu.class_id = ?
-               LIMIT 1`,
+              "SELECT id FROM pass_use_exclusions WHERE user_email = ? AND class_id = ?",
               [email, classId],
-              (useErr, useRow) => {
-                if (useErr || useRow) {
+              (exclErr, exclRow) => {
+                if (exclErr || exclRow) {
+                  // Admin manuálisan törölte – nem hozzuk vissza
                   return processNext(index + 1);
                 }
-                const usedAt = new Date().toISOString();
-                db.run(
-                  "UPDATE passes SET remaining = remaining - 1 WHERE id = ?",
-                  [passRow.id],
-                  function onUpdate(updateErr) {
-                    if (updateErr || this.changes === 0) {
+                db.get(
+                  `SELECT pu.id
+                   FROM pass_uses pu
+                   JOIN passes p ON pu.pass_id = p.id
+                   WHERE p.user_email = ? AND pu.class_id = ?
+                   LIMIT 1`,
+                  [email, classId],
+                  (useErr, useRow) => {
+                    if (useErr || useRow) {
                       return processNext(index + 1);
                     }
+                    const usedAt = new Date().toISOString();
                     db.run(
-                      "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
-                      [passRow.id, classId, usedAt],
-                      () => processNext(index + 1),
+                      "UPDATE passes SET remaining = remaining - 1 WHERE id = ?",
+                      [passRow.id],
+                      function onUpdate(updateErr) {
+                        if (updateErr || this.changes === 0) {
+                          return processNext(index + 1);
+                        }
+                        db.run(
+                          "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
+                          [passRow.id, classId, usedAt],
+                          () => processNext(index + 1),
+                        );
+                      },
                     );
                   },
                 );
@@ -1595,74 +1623,12 @@ app.post("/api/admin/passes/assign", requireAdmin, (req, res) => {
       if (!row) {
         return res.status(404).json({ error: "User not found" });
       }
-      const userEmail = row.email;
-      // Régi bérlet és felhasznált alkalmak száma az adósságszámításhoz
-      db.get(
-        "SELECT id, total FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
-        [userEmail],
-        (passErr, oldPass) => {
-          if (passErr) {
-            return res.status(500).json({ error: "Database error" });
-          }
-          const calcDebt = (oldUsed, oldTotal) =>
-            Math.max(0, oldUsed - (oldTotal || 0));
-
-          const doCreate = (debt) => {
-            const createdAt = new Date().toISOString();
-            const newRemaining = 10 - debt;
-            db.run(
-              "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, 10, ?, ?)",
-              [userEmail, newRemaining, createdAt],
-              function onInsert(insertErr) {
-                if (insertErr) {
-                  return res.status(500).json({ error: "Database error" });
-                }
-                const newPassId = this.lastID;
-                if (debt <= 0) {
-                  return res.json({ ok: true, total: 10, debt: 0 });
-                }
-                // Adósság bejegyzések az új bérletbe (régi pass_uses NEM törlődnek)
-                const now = new Date().toISOString();
-                let pending = debt;
-                let failed = false;
-                for (let i = 0; i < debt; i++) {
-                  db.run(
-                    "INSERT INTO pass_uses (pass_id, used_at) VALUES (?, ?)",
-                    [newPassId, now],
-                    (useErr) => {
-                      if (useErr && !failed) {
-                        failed = true;
-                        return res
-                          .status(500)
-                          .json({ error: "Database error" });
-                      }
-                      pending--;
-                      if (pending === 0 && !failed) {
-                        return res.json({ ok: true, total: 10, debt });
-                      }
-                    },
-                  );
-                }
-              },
-            );
-          };
-
-          if (!oldPass) {
-            return doCreate(0);
-          }
-          db.get(
-            "SELECT COUNT(*) AS cnt FROM pass_uses WHERE pass_id = ?",
-            [oldPass.id],
-            (cntErr, cntRow) => {
-              if (cntErr) {
-                return res.status(500).json({ error: "Database error" });
-              }
-              const oldUsed = cntRow ? cntRow.cnt : 0;
-              doCreate(calcDebt(oldUsed, oldPass.total));
-            },
-          );
-        },
-      );
+      createPassWithDebtTransfer(row.email, 10, null, (createErr) => {
+        if (createErr) {
+          return res.status(500).json({ error: "Database error" });
+        }
+        return res.json({ ok: true, total: 10 });
+      });
     },
   );
 });
@@ -1848,29 +1814,47 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
 
 app.delete("/api/admin/passes/use/:id", requireAdmin, (req, res) => {
   const useId = Number(req.params.id);
-  db.get("SELECT pass_id FROM pass_uses WHERE id = ?", [useId], (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: "Database error" });
-    }
-    if (!row) {
-      return res.status(404).json({ error: "Use not found" });
-    }
-    db.run("DELETE FROM pass_uses WHERE id = ?", [useId], (delErr) => {
-      if (delErr) {
+  db.get(
+    `SELECT pu.pass_id, pu.class_id, p.user_email
+     FROM pass_uses pu
+     JOIN passes p ON pu.pass_id = p.id
+     WHERE pu.id = ?`,
+    [useId],
+    (err, row) => {
+      if (err) {
         return res.status(500).json({ error: "Database error" });
       }
-      db.run(
-        "UPDATE passes SET remaining = remaining + 1 WHERE id = ?",
-        [row.pass_id],
-        (updateErr) => {
-          if (updateErr) {
-            return res.status(500).json({ error: "Database error" });
-          }
-          return res.json({ ok: true });
-        },
-      );
-    });
-  });
+      if (!row) {
+        return res.status(404).json({ error: "Use not found" });
+      }
+      db.run("DELETE FROM pass_uses WHERE id = ?", [useId], (delErr) => {
+        if (delErr) {
+          return res.status(500).json({ error: "Database error" });
+        }
+        db.run(
+          "UPDATE passes SET remaining = remaining + 1 WHERE id = ?",
+          [row.pass_id],
+          (updateErr) => {
+            if (updateErr) {
+              return res.status(500).json({ error: "Database error" });
+            }
+            // Ha class_id-hez kötött alkalom volt, megjegyezzük hogy ne írja vissza a sweep
+            if (row.class_id) {
+              const sql = IS_POSTGRES
+                ? "INSERT INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?) ON CONFLICT (user_email, class_id) DO NOTHING"
+                : "INSERT OR IGNORE INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?)";
+              db.run(sql, [
+                row.user_email,
+                row.class_id,
+                new Date().toISOString(),
+              ]);
+            }
+            return res.json({ ok: true });
+          },
+        );
+      });
+    },
+  );
 });
 
 app.get("/api/admin/classes", requireAdmin, (req, res) => {
