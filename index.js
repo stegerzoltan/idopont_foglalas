@@ -3290,12 +3290,58 @@ const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
             });
           } else {
             // Teljesen felhasznált vagy tartozásos bérlet → fresh start
-            db.run(
-              "DELETE FROM pass_uses WHERE pass_id = ?",
+            // Az eredeti tartozás-bejegyzések dátumát megőrizzük (nem töröljük és nem hozzuk létre újra)
+            // Lekérjük az összes pass_use-t időrend szerint
+            db.all(
+              "SELECT id FROM pass_uses WHERE pass_id = ? ORDER BY used_at ASC",
               [oldPass.id],
-              (delErr) => {
-                if (delErr) return cb(delErr);
-                createFreshWithDebt(debt);
+              (usesErr, useRows) => {
+                if (usesErr) return cb(usesErr);
+                // Az első oldPass.total db "normális" bejegyzés – ezeket töröljük
+                // A maradék debt db az "átlépett" bejegyzések – ezeket migráljuk
+                const paidIds = (useRows || []).slice(0, oldPass.total).map((r) => r.id);
+                const debtIds = (useRows || []).slice(oldPass.total).map((r) => r.id);
+
+                const createdAt = new Date().toISOString();
+                const newRemaining = total - debtIds.length;
+                const insertSql = stripeSessionId
+                  ? "INSERT INTO passes (user_email, total, remaining, created_at, stripe_session_id) VALUES (?, ?, ?, ?, ?)"
+                  : "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)";
+                const insertParams = stripeSessionId
+                  ? [userEmail, total, newRemaining, createdAt, stripeSessionId]
+                  : [userEmail, total, newRemaining, createdAt];
+
+                db.run(insertSql, insertParams, function onInsert(insertErr) {
+                  if (insertErr) return cb(insertErr);
+                  const newPassId = this.lastID;
+
+                  // Normál bejegyzések törlése
+                  const deletePaid = (done) => {
+                    if (paidIds.length === 0) return done();
+                    const placeholders = paidIds.map(() => "?").join(",");
+                    db.run(
+                      `DELETE FROM pass_uses WHERE id IN (${placeholders})`,
+                      paidIds,
+                      (delErr) => done(delErr),
+                    );
+                  };
+
+                  // Tartozás bejegyzések átmigrálása (eredeti dátum megőrzésével)
+                  const migrateDebt = (done) => {
+                    if (debtIds.length === 0) return done();
+                    const placeholders = debtIds.map(() => "?").join(",");
+                    db.run(
+                      `UPDATE pass_uses SET pass_id = ? WHERE id IN (${placeholders})`,
+                      [newPassId, ...debtIds],
+                      (migrateErr) => done(migrateErr),
+                    );
+                  };
+
+                  deletePaid((delErr) => {
+                    if (delErr) return cb(delErr);
+                    migrateDebt((migrateErr) => cb(migrateErr || null, !migrateErr));
+                  });
+                });
               },
             );
           }
