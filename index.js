@@ -907,29 +907,37 @@ const deductPassUseForClassIfPast = (userEmail, classId, classStartsAt, cb) => {
     // future class – processDuePassUses will handle it later
     return cb(null);
   }
+  // Admin által manuálisan törölt alkalom – ne vonjuk le újra
   db.get(
-    "SELECT id FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
-    [userEmail],
-    (passErr, passRow) => {
-      if (passErr || !passRow) return cb(null); // no pass → nothing to deduct
-      // idempotency: already deducted for this class?
+    "SELECT id FROM pass_use_exclusions WHERE user_email = ? AND class_id = ?",
+    [userEmail, classId],
+    (exclErr, exclRow) => {
+      if (exclErr || exclRow) return cb(null);
       db.get(
-        `SELECT pu.id FROM pass_uses pu
-         JOIN passes p ON pu.pass_id = p.id
-         WHERE p.user_email = ? AND pu.class_id = ? LIMIT 1`,
-        [userEmail, classId],
-        (dupeErr, dupeRow) => {
-          if (dupeErr || dupeRow) return cb(null); // already done
-          const usedAt = new Date().toISOString();
-          db.run(
-            "UPDATE passes SET remaining = remaining - 1 WHERE id = ?",
-            [passRow.id],
-            function onUpdate(updateErr) {
-              if (updateErr || this.changes === 0) return cb(null);
+        "SELECT id FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
+        [userEmail],
+        (passErr, passRow) => {
+          if (passErr || !passRow) return cb(null); // no pass → nothing to deduct
+          // idempotency: already deducted for this class?
+          db.get(
+            `SELECT pu.id FROM pass_uses pu
+             JOIN passes p ON pu.pass_id = p.id
+             WHERE p.user_email = ? AND pu.class_id = ? LIMIT 1`,
+            [userEmail, classId],
+            (dupeErr, dupeRow) => {
+              if (dupeErr || dupeRow) return cb(null); // already done
+              const usedAt = new Date().toISOString();
               db.run(
-                "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
-                [passRow.id, classId, usedAt],
-                (insertErr) => cb(insertErr || null),
+                "UPDATE passes SET remaining = remaining - 1 WHERE id = ?",
+                [passRow.id],
+                function onUpdate(updateErr) {
+                  if (updateErr || this.changes === 0) return cb(null);
+                  db.run(
+                    "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
+                    [passRow.id, classId, usedAt],
+                    (insertErr) => cb(insertErr || null),
+                  );
+                },
               );
             },
           );
@@ -3299,8 +3307,12 @@ const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
                 if (usesErr) return cb(usesErr);
                 // Az első oldPass.total db "normális" bejegyzés – ezeket töröljük
                 // A maradék debt db az "átlépett" bejegyzések – ezeket migráljuk
-                const paidIds = (useRows || []).slice(0, oldPass.total).map((r) => r.id);
-                const debtIds = (useRows || []).slice(oldPass.total).map((r) => r.id);
+                const paidIds = (useRows || [])
+                  .slice(0, oldPass.total)
+                  .map((r) => r.id);
+                const debtIds = (useRows || [])
+                  .slice(oldPass.total)
+                  .map((r) => r.id);
 
                 const createdAt = new Date().toISOString();
                 const newRemaining = total - debtIds.length;
@@ -3339,7 +3351,9 @@ const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
 
                   deletePaid((delErr) => {
                     if (delErr) return cb(delErr);
-                    migrateDebt((migrateErr) => cb(migrateErr || null, !migrateErr));
+                    migrateDebt((migrateErr) =>
+                      cb(migrateErr || null, !migrateErr),
+                    );
                   });
                 });
               },
