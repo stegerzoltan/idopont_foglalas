@@ -1847,17 +1847,25 @@ app.delete("/api/admin/passes/use/:id", requireAdmin, (req, res) => {
               return res.status(500).json({ error: "Database error" });
             }
             // Ha class_id-hez kötött alkalom volt, megjegyezzük hogy ne írja vissza a sweep
-            if (row.class_id) {
-              const sql = IS_POSTGRES
-                ? "INSERT INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?) ON CONFLICT (user_email, class_id) DO NOTHING"
-                : "INSERT OR IGNORE INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?)";
-              db.run(sql, [
-                row.user_email,
-                row.class_id,
-                new Date().toISOString(),
-              ]);
+            if (!row.class_id) {
+              return res.json({ ok: true });
             }
-            return res.json({ ok: true });
+            const exclSql = IS_POSTGRES
+              ? "INSERT INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?) ON CONFLICT (user_email, class_id) DO NOTHING"
+              : "INSERT OR IGNORE INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?)";
+            db.run(
+              exclSql,
+              [row.user_email, row.class_id, new Date().toISOString()],
+              (exclErr) => {
+                if (exclErr) {
+                  console.error(
+                    "pass_use_exclusions insert error:",
+                    exclErr.message,
+                  );
+                }
+                return res.json({ ok: true });
+              },
+            );
           },
         );
       });
