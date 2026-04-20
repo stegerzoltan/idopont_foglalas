@@ -1933,7 +1933,7 @@ signupForm.addEventListener("submit", async (event) => {
   await loadClasses();
   await loadMySignups();
   pendingSignupItem = null;
-  setTimeout(() => closeModal(signupModal), 2500);
+  setTimeout(() => closeModal(signupModal), 10000);
   console.log("Signup", data.status);
 });
 
