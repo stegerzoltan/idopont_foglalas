@@ -929,14 +929,14 @@ const deductPassUseForClassIfPast = (userEmail, classId, classStartsAt, cb) => {
               if (dupeErr || dupeRow) return cb(null); // already done
               const usedAt = new Date().toISOString();
               db.run(
-                "UPDATE passes SET remaining = remaining - 1 WHERE id = ?",
-                [passRow.id],
-                function onUpdate(updateErr) {
-                  if (updateErr || this.changes === 0) return cb(null);
+                "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
+                [passRow.id, classId, usedAt],
+                (insertErr) => {
+                  if (insertErr) return cb(insertErr);
                   db.run(
-                    "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
-                    [passRow.id, classId, usedAt],
-                    (insertErr) => cb(insertErr || null),
+                    "UPDATE passes SET remaining = total - (SELECT COUNT(*) FROM pass_uses WHERE pass_id = passes.id) WHERE id = ?",
+                    [passRow.id],
+                    (syncErr) => cb(syncErr || null),
                   );
                 },
               );
@@ -1001,15 +1001,15 @@ const processDuePassUses = () => {
                     }
                     const usedAt = new Date().toISOString();
                     db.run(
-                      "UPDATE passes SET remaining = remaining - 1 WHERE id = ?",
-                      [passRow.id],
-                      function onUpdate(updateErr) {
-                        if (updateErr || this.changes === 0) {
+                      "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
+                      [passRow.id, classId, usedAt],
+                      (insertErr) => {
+                        if (insertErr) {
                           return processNext(index + 1);
                         }
                         db.run(
-                          "INSERT INTO pass_uses (pass_id, class_id, used_at) VALUES (?, ?, ?)",
-                          [passRow.id, classId, usedAt],
+                          "UPDATE passes SET remaining = total - (SELECT COUNT(*) FROM pass_uses WHERE pass_id = passes.id) WHERE id = ?",
+                          [passRow.id],
                           () => processNext(index + 1),
                         );
                       },
@@ -1488,17 +1488,17 @@ app.post("/api/signups/:id/cancel", requireUser, (req, res) => {
               }
               if (passUseRow) {
                 db.run(
-                  "UPDATE passes SET remaining = remaining + 1 WHERE id = ?",
-                  [passUseRow.pass_id],
-                  (refundErr) => {
-                    if (refundErr) {
+                  "DELETE FROM pass_uses WHERE id = ?",
+                  [passUseRow.id],
+                  (deleteErr) => {
+                    if (deleteErr) {
                       return res.status(500).json({ error: "Database error" });
                     }
                     db.run(
-                      "DELETE FROM pass_uses WHERE id = ?",
-                      [passUseRow.id],
-                      (deleteErr) => {
-                        if (deleteErr) {
+                      "UPDATE passes SET remaining = total - (SELECT COUNT(*) FROM pass_uses WHERE pass_id = passes.id) WHERE id = ?",
+                      [passUseRow.pass_id],
+                      (refundErr) => {
+                        if (refundErr) {
                           return res
                             .status(500)
                             .json({ error: "Database error" });
@@ -1688,18 +1688,18 @@ app.get("/api/admin/passes/:email", requireAdmin, (req, res) => {
 });
 
 app.post("/api/admin/passes/set", requireAdmin, (req, res) => {
-  const { email, total, remaining } = req.body;
+  const { email, total, used } = req.body;
   if (!email) {
     return res.status(400).json({ error: "Email required" });
   }
   const normalizedEmail = String(email).toLowerCase().trim();
   const totalValue = Number(total);
-  const remainingValue = Number(remaining);
+  const usedValue = Number(used);
   if (!Number.isFinite(totalValue) || totalValue < 0) {
     return res.status(400).json({ error: "Invalid total" });
   }
-  if (!Number.isFinite(remainingValue) || remainingValue < 0) {
-    return res.status(400).json({ error: "Invalid remaining" });
+  if (!Number.isFinite(usedValue) || usedValue < 0) {
+    return res.status(400).json({ error: "Invalid used" });
   }
   db.get(
     "SELECT email FROM users WHERE LOWER(email) = ?",
@@ -1719,37 +1719,110 @@ app.post("/api/admin/passes/set", requireAdmin, (req, res) => {
             return res.status(500).json({ error: "Database error" });
           }
 
-          // Helper function to set or create pass
-          const setPassValue = (passId, shouldInsert) => {
-            const query = shouldInsert
-              ? "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)"
-              : "UPDATE passes SET total = ?, remaining = ? WHERE id = ?";
+          // Sync pass_uses count to match the entered used value, then persist
+          const syncAndSave = (passId, cb) => {
+            db.get(
+              "SELECT COUNT(*) AS cnt FROM pass_uses WHERE pass_id = ?",
+              [passId],
+              (cntErr, cntRow) => {
+                if (cntErr) return cb(cntErr);
+                const currentUsed = cntRow ? Number(cntRow.cnt) : 0;
+                const diff = usedValue - currentUsed;
 
-            const params = shouldInsert
-              ? [
-                  normalizedEmail,
-                  totalValue,
-                  remainingValue,
-                  new Date().toISOString(),
-                ]
-              : [totalValue, remainingValue, passId];
+                const finalize = (actualUsed) => {
+                  const remainingValue = totalValue - actualUsed;
+                  db.run(
+                    "UPDATE passes SET total = ?, remaining = ? WHERE id = ?",
+                    [totalValue, remainingValue, passId],
+                    function onUpdate(updateErr) {
+                      if (updateErr) return cb(updateErr);
+                      cb(null, {
+                        id: passId,
+                        total: totalValue,
+                        remaining: remainingValue,
+                      });
+                    },
+                  );
+                };
 
-            db.run(query, params, function onUpdate(updateErr) {
-              if (updateErr) {
-                return res.status(500).json({ error: "Database error" });
-              }
-              return res.json({
-                id: shouldInsert ? this.lastID : passId,
-                total: totalValue,
-                remaining: remainingValue,
-              });
-            });
+                if (diff === 0) {
+                  return finalize(currentUsed);
+                }
+
+                if (diff > 0) {
+                  // Add diff new pass_use entries (no class_id = manually added)
+                  const now = new Date().toISOString();
+                  let pending = diff;
+                  let failed = false;
+                  for (let i = 0; i < diff; i++) {
+                    db.run(
+                      "INSERT INTO pass_uses (pass_id, used_at) VALUES (?, ?)",
+                      [passId, now],
+                      (insertErr) => {
+                        if (insertErr && !failed) {
+                          failed = true;
+                          return cb(insertErr);
+                        }
+                        pending--;
+                        if (pending === 0 && !failed) finalize(usedValue);
+                      },
+                    );
+                  }
+                } else {
+                  // Remove oldest manually-added (no class_id) entries first
+                  const toRemove = Math.abs(diff);
+                  db.all(
+                    "SELECT id FROM pass_uses WHERE pass_id = ? AND class_id IS NULL ORDER BY used_at ASC LIMIT ?",
+                    [passId, toRemove],
+                    (selErr, rows) => {
+                      if (selErr) return cb(selErr);
+                      if (!rows || rows.length === 0) {
+                        // Nothing to remove, just update total
+                        return finalize(currentUsed);
+                      }
+                      const ids = rows.map((r) => r.id);
+                      const placeholders = ids.map(() => "?").join(",");
+                      db.run(
+                        `DELETE FROM pass_uses WHERE id IN (${placeholders})`,
+                        ids,
+                        (delErr) => {
+                          if (delErr) return cb(delErr);
+                          finalize(currentUsed - ids.length);
+                        },
+                      );
+                    },
+                  );
+                }
+              },
+            );
           };
 
           if (!passRow) {
-            setPassValue(null, true);
+            // Create a new pass first, then sync
+            const createdAt = new Date().toISOString();
+            db.run(
+              "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)",
+              [normalizedEmail, totalValue, totalValue - usedValue, createdAt],
+              function onInsert(insertErr) {
+                if (insertErr) {
+                  return res.status(500).json({ error: "Database error" });
+                }
+                const newPassId = this.lastID;
+                syncAndSave(newPassId, (syncErr, result) => {
+                  if (syncErr) {
+                    return res.status(500).json({ error: "Database error" });
+                  }
+                  return res.json(result);
+                });
+              },
+            );
           } else {
-            setPassValue(passRow.id, false);
+            syncAndSave(passRow.id, (syncErr, result) => {
+              if (syncErr) {
+                return res.status(500).json({ error: "Database error" });
+              }
+              return res.json(result);
+            });
           }
         },
       );
@@ -1769,58 +1842,34 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
     [email],
     (err, passRow) => {
       if (err) {
-        return res
-          .status(500)
-          .json({ error: "Database error: " + err.message });
+        return res.status(500).json({ error: "Database error: " + err.message });
       }
       if (!passRow) {
         return res.status(400).json({ error: "No active pass" });
       }
 
-      // Check current usage count
-      db.get(
-        "SELECT COUNT(*) as count FROM pass_uses WHERE pass_id = ?",
-        [passRow.id],
-        (countErr, countRow) => {
-          if (countErr) {
-            return res
-              .status(500)
-              .json({ error: "Database error: " + countErr.message });
+      const usedAt = used_at || new Date().toISOString();
+
+      // Insert the pass use (no upper limit - remaining can go negative = debt)
+      db.run(
+        "INSERT INTO pass_uses (pass_id, used_at) VALUES (?, ?)",
+        [passRow.id, usedAt],
+        function onInsert(insertErr) {
+          if (insertErr) {
+            return res.status(500).json({ error: "Database error: " + insertErr.message });
           }
 
-          const currentUsed = countRow ? countRow.count : 0;
+          const insertedId = this.lastID;
 
-          const usedAt = used_at || new Date().toISOString();
-
-          // Insert the pass use (no upper limit - remaining can go negative = debt)
+          // Sync remaining from actual count (not relative ±1)
           db.run(
-            "INSERT INTO pass_uses (pass_id, used_at) VALUES (?, ?)",
-            [passRow.id, usedAt],
-            function onInsert(insertErr) {
-              if (insertErr) {
-                return res
-                  .status(500)
-                  .json({ error: "Database error: " + insertErr.message });
+            "UPDATE passes SET remaining = total - (SELECT COUNT(*) FROM pass_uses WHERE pass_id = passes.id) WHERE id = ?",
+            [passRow.id],
+            (syncErr) => {
+              if (syncErr) {
+                console.warn("Warning: Failed to sync remaining:", syncErr.message);
               }
-
-              const insertedId = this.lastID;
-
-              // Update remaining (can be negative = debt)
-              const remaining = passRow.total - (currentUsed + 1);
-              db.run(
-                "UPDATE passes SET remaining = ? WHERE id = ?",
-                [remaining, passRow.id],
-                (syncErr) => {
-                  // Return success regardless of sync error (INSERT already succeeded)
-                  if (syncErr) {
-                    console.warn(
-                      "Warning: Failed to sync remaining:",
-                      syncErr.message,
-                    );
-                  }
-                  return res.json({ id: insertedId, success: true });
-                },
-              );
+              return res.json({ id: insertedId, success: true });
             },
           );
         },
@@ -1849,7 +1898,7 @@ app.delete("/api/admin/passes/use/:id", requireAdmin, (req, res) => {
           return res.status(500).json({ error: "Database error" });
         }
         db.run(
-          "UPDATE passes SET remaining = remaining + 1 WHERE id = ?",
+          "UPDATE passes SET remaining = total - (SELECT COUNT(*) FROM pass_uses WHERE pass_id = passes.id) WHERE id = ?",
           [row.pass_id],
           (updateErr) => {
             if (updateErr) {
@@ -2401,17 +2450,17 @@ app.post("/api/admin/classes/:id/signups/cancel", requireAdmin, (req, res) => {
                 return finalize();
               }
               db.run(
-                "UPDATE passes SET remaining = remaining + 1 WHERE id = ?",
-                [passUseRow.pass_id],
-                (refundErr) => {
-                  if (refundErr) {
+                "DELETE FROM pass_uses WHERE id = ?",
+                [passUseRow.id],
+                (deleteErr) => {
+                  if (deleteErr) {
                     return res.status(500).json({ error: "Database error" });
                   }
                   db.run(
-                    "DELETE FROM pass_uses WHERE id = ?",
-                    [passUseRow.id],
-                    (deleteErr) => {
-                      if (deleteErr) {
+                    "UPDATE passes SET remaining = total - (SELECT COUNT(*) FROM pass_uses WHERE pass_id = passes.id) WHERE id = ?",
+                    [passUseRow.pass_id],
+                    (refundErr) => {
+                      if (refundErr) {
                         return res
                           .status(500)
                           .json({ error: "Database error" });
@@ -2502,75 +2551,74 @@ app.delete("/api/admin/classes/:id", requireAdmin, (req, res) => {
             return res.status(500).json({ error: "Database error" });
           }
           db.all(
-            "SELECT pass_id FROM pass_uses WHERE class_id = ?",
+            "SELECT DISTINCT pass_id FROM pass_uses WHERE class_id = ?",
             [classId],
             (usesErr, useRows) => {
               if (usesErr) {
                 return res.status(500).json({ error: "Database error" });
               }
-              const refundNext = (index) => {
-                if (index >= useRows.length) {
-                  return cleanupAfterRefunds();
-                }
-                const passId = useRows[index].pass_id;
-                db.run(
-                  "UPDATE passes SET remaining = remaining + 1 WHERE id = ?",
-                  [passId],
-                  (refundErr) => {
-                    if (refundErr) {
-                      return res.status(500).json({ error: "Database error" });
+
+              // Delete all pass_uses for this class first, then resync remaining for each affected pass
+              db.run(
+                "DELETE FROM pass_uses WHERE class_id = ?",
+                [classId],
+                (delUsesErr) => {
+                  if (delUsesErr) {
+                    return res.status(500).json({ error: "Database error" });
+                  }
+
+                  const syncNext = (index) => {
+                    if (index >= useRows.length) {
+                      return cleanupAfterRefunds();
                     }
-                    return refundNext(index + 1);
-                  },
-                );
-              };
+                    const passId = useRows[index].pass_id;
+                    db.run(
+                      "UPDATE passes SET remaining = total - (SELECT COUNT(*) FROM pass_uses WHERE pass_id = passes.id) WHERE id = ?",
+                      [passId],
+                      (refundErr) => {
+                        if (refundErr) {
+                          return res.status(500).json({ error: "Database error" });
+                        }
+                        return syncNext(index + 1);
+                      },
+                    );
+                  };
 
               const cleanupAfterRefunds = () => {
                 db.run(
-                  "DELETE FROM pass_uses WHERE class_id = ?",
+                  "DELETE FROM signups WHERE class_id = ?",
                   [classId],
-                  (delUsesErr) => {
-                    if (delUsesErr) {
+                  (delSignupsErr) => {
+                    if (delSignupsErr) {
                       return res.status(500).json({ error: "Database error" });
                     }
                     db.run(
-                      "DELETE FROM signups WHERE class_id = ?",
+                      "DELETE FROM classes WHERE id = ?",
                       [classId],
-                      (delSignupsErr) => {
-                        if (delSignupsErr) {
+                      function onDelete(err) {
+                        if (err) {
                           return res
                             .status(500)
                             .json({ error: "Database error" });
                         }
+                        if (signupRows.length > 0) {
+                          const message = `Lemondás: Óra törölve - ${classRow.title} (${classRow.starts_at}) - ${signupRows.length} feliratkozás`;
+                          createNotification("cancel", message);
+                          sendTelegramMessage(message);
+                        }
+                        // Megjegyezzük, hogy ezt az időpontot ne írja vissza a seed
                         db.run(
-                          "DELETE FROM classes WHERE id = ?",
-                          [classId],
-                          function onDelete(err) {
-                            if (err) {
-                              return res
-                                .status(500)
-                                .json({ error: "Database error" });
-                            }
-                            if (signupRows.length > 0) {
-                              const message = `Lemondás: Óra törölve - ${classRow.title} (${classRow.starts_at}) - ${signupRows.length} feliratkozás`;
-                              createNotification("cancel", message);
-                              sendTelegramMessage(message);
-                            }
-                            // Megjegyezzük, hogy ezt az időpontot ne írja vissza a seed
-                            db.run(
-                              "INSERT INTO seed_exclusions (starts_at, created_at) VALUES (?, ?) ON CONFLICT (starts_at) DO NOTHING",
-                              [classRow.starts_at, new Date().toISOString()],
-                            );
-                            return res.json({ deleted: this.changes });
-                          },
+                          "INSERT INTO seed_exclusions (starts_at, created_at) VALUES (?, ?) ON CONFLICT (starts_at) DO NOTHING",
+                          [classRow.starts_at, new Date().toISOString()],
                         );
+                        return res.json({ deleted: this.changes });
                       },
                     );
                   },
                 );
               };
 
-              return refundNext(0);
+              return syncNext(0);
             },
           );
         },
@@ -2748,17 +2796,17 @@ app.post("/api/admin/signups/:id/cancel", requireAdmin, (req, res) => {
                 return finalize();
               }
               db.run(
-                "UPDATE passes SET remaining = remaining + 1 WHERE id = ?",
-                [passUseRow.pass_id],
-                (refundErr) => {
-                  if (refundErr) {
+                "DELETE FROM pass_uses WHERE id = ?",
+                [passUseRow.id],
+                (deleteErr) => {
+                  if (deleteErr) {
                     return res.status(500).json({ error: "Database error" });
                   }
                   db.run(
-                    "DELETE FROM pass_uses WHERE id = ?",
-                    [passUseRow.id],
-                    (deleteErr) => {
-                      if (deleteErr) {
+                    "UPDATE passes SET remaining = total - (SELECT COUNT(*) FROM pass_uses WHERE pass_id = passes.id) WHERE id = ?",
+                    [passUseRow.pass_id],
+                    (refundErr) => {
+                      if (refundErr) {
                         return res
                           .status(500)
                           .json({ error: "Database error" });
@@ -3319,15 +3367,10 @@ const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
         (cntErr, cntRow) => {
           if (cntErr) return cb(cntErr);
           const oldUsed = cntRow ? Number(cntRow.cnt) : 0;
-          // Use BOTH the pass_uses count AND the stored remaining column as debt sources.
-          // The remaining column may reflect manually-set debt that isn't yet in pass_uses.
-          const oldRemainingByDb = Number(oldPass.remaining);
+          // Trust pass_uses count as the authoritative source (remaining column can drift
+          // from the class sweep or stale admin saves, causing inflated debt transfers).
           const oldRemainingByCount = oldPass.total - oldUsed;
-          // Take the minimum (most conservative) remaining to not miss any debt
-          const effectiveRemaining = Math.min(
-            oldRemainingByDb,
-            oldRemainingByCount,
-          );
+          const effectiveRemaining = oldRemainingByCount;
 
           if (effectiveRemaining > 0) {
             // Van még fel nem használt alkalom → akkumulálás
@@ -3352,12 +3395,11 @@ const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
             });
           } else {
             // Teljesen felhasznált vagy tartozásos bérlet → fresh start
-            // Debt from DB remaining column (e.g. manually set via admin panel)
-            const debtByDb = Math.max(0, -oldRemainingByDb);
-            // Debt from actual pass_uses count
+            // Debt is based solely on the actual pass_uses count (authoritative source).
+            // Trusting the remaining column here is dangerous: the class sweep can
+            // decrement it below 0 without a matching pass_use, causing inflated debt.
             const debtByCount = Math.max(0, oldUsed - oldPass.total);
-            // Use the higher of the two so that manually-set debt is not lost
-            const actualDebt = Math.max(debtByDb, debtByCount);
+            const actualDebt = debtByCount;
 
             // Lekérjük az összes pass_use-t időrend szerint (class_id is kell az exclusion miatt)
             db.all(

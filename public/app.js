@@ -1656,11 +1656,10 @@ const saveAdminPass = async () => {
   }
   const total = passTotalInput.value;
   const used = passRemainingInput.value;
-  const remaining = String(Math.max(0, Number(total) - Number(used)));
   const response = await apiFetch("/api/admin/passes/set", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, total, remaining }),
+    body: JSON.stringify({ email, total, used }),
   });
   if (handleAdminUnauthorized(response)) {
     return;
