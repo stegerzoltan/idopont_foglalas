@@ -1842,7 +1842,9 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
     [email],
     (err, passRow) => {
       if (err) {
-        return res.status(500).json({ error: "Database error: " + err.message });
+        return res
+          .status(500)
+          .json({ error: "Database error: " + err.message });
       }
       if (!passRow) {
         return res.status(400).json({ error: "No active pass" });
@@ -1856,7 +1858,9 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
         [passRow.id, usedAt],
         function onInsert(insertErr) {
           if (insertErr) {
-            return res.status(500).json({ error: "Database error: " + insertErr.message });
+            return res
+              .status(500)
+              .json({ error: "Database error: " + insertErr.message });
           }
 
           const insertedId = this.lastID;
@@ -1867,7 +1871,10 @@ app.post("/api/admin/passes/use", requireAdmin, (req, res) => {
             [passRow.id],
             (syncErr) => {
               if (syncErr) {
-                console.warn("Warning: Failed to sync remaining:", syncErr.message);
+                console.warn(
+                  "Warning: Failed to sync remaining:",
+                  syncErr.message,
+                );
               }
               return res.json({ id: insertedId, success: true });
             },
@@ -2577,48 +2584,54 @@ app.delete("/api/admin/classes/:id", requireAdmin, (req, res) => {
                       [passId],
                       (refundErr) => {
                         if (refundErr) {
-                          return res.status(500).json({ error: "Database error" });
+                          return res
+                            .status(500)
+                            .json({ error: "Database error" });
                         }
                         return syncNext(index + 1);
                       },
                     );
                   };
 
-              const cleanupAfterRefunds = () => {
-                db.run(
-                  "DELETE FROM signups WHERE class_id = ?",
-                  [classId],
-                  (delSignupsErr) => {
-                    if (delSignupsErr) {
-                      return res.status(500).json({ error: "Database error" });
-                    }
+                  const cleanupAfterRefunds = () => {
                     db.run(
-                      "DELETE FROM classes WHERE id = ?",
+                      "DELETE FROM signups WHERE class_id = ?",
                       [classId],
-                      function onDelete(err) {
-                        if (err) {
+                      (delSignupsErr) => {
+                        if (delSignupsErr) {
                           return res
                             .status(500)
                             .json({ error: "Database error" });
                         }
-                        if (signupRows.length > 0) {
-                          const message = `Lemondás: Óra törölve - ${classRow.title} (${classRow.starts_at}) - ${signupRows.length} feliratkozás`;
-                          createNotification("cancel", message);
-                          sendTelegramMessage(message);
-                        }
-                        // Megjegyezzük, hogy ezt az időpontot ne írja vissza a seed
                         db.run(
-                          "INSERT INTO seed_exclusions (starts_at, created_at) VALUES (?, ?) ON CONFLICT (starts_at) DO NOTHING",
-                          [classRow.starts_at, new Date().toISOString()],
+                          "DELETE FROM classes WHERE id = ?",
+                          [classId],
+                          function onDelete(err) {
+                            if (err) {
+                              return res
+                                .status(500)
+                                .json({ error: "Database error" });
+                            }
+                            if (signupRows.length > 0) {
+                              const message = `Lemondás: Óra törölve - ${classRow.title} (${classRow.starts_at}) - ${signupRows.length} feliratkozás`;
+                              createNotification("cancel", message);
+                              sendTelegramMessage(message);
+                            }
+                            // Megjegyezzük, hogy ezt az időpontot ne írja vissza a seed
+                            db.run(
+                              "INSERT INTO seed_exclusions (starts_at, created_at) VALUES (?, ?) ON CONFLICT (starts_at) DO NOTHING",
+                              [classRow.starts_at, new Date().toISOString()],
+                            );
+                            return res.json({ deleted: this.changes });
+                          },
                         );
-                        return res.json({ deleted: this.changes });
                       },
                     );
-                  },
-                );
-              };
+                  };
 
-              return syncNext(0);
+                  return syncNext(0);
+                },
+              );
             },
           );
         },
