@@ -901,6 +901,7 @@ const seedWeeklyClasses = () => {
 // deduct a pass use (idempotent – skips if already deducted for this class)
 // ---------------------------------------------------------------------------
 const deductPassUseForClassIfPast = (userEmail, classId, classStartsAt, cb) => {
+  const normalizedEmail = String(userEmail).toLowerCase().trim();
   const now = new Date();
   const classStart = new Date(classStartsAt);
   if (classStart > now) {
@@ -909,21 +910,21 @@ const deductPassUseForClassIfPast = (userEmail, classId, classStartsAt, cb) => {
   }
   // Admin által manuálisan törölt alkalom – ne vonjuk le újra
   db.get(
-    "SELECT id FROM pass_use_exclusions WHERE user_email = ? AND class_id = ?",
-    [userEmail, classId],
+    "SELECT id FROM pass_use_exclusions WHERE LOWER(user_email) = ? AND class_id = ?",
+    [normalizedEmail, classId],
     (exclErr, exclRow) => {
       if (exclErr || exclRow) return cb(null);
       db.get(
-        "SELECT id FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
-        [userEmail],
+        "SELECT id FROM passes WHERE LOWER(user_email) = ? ORDER BY created_at DESC LIMIT 1",
+        [normalizedEmail],
         (passErr, passRow) => {
           if (passErr || !passRow) return cb(null); // no pass → nothing to deduct
           // idempotency: already deducted for this class?
           db.get(
             `SELECT pu.id FROM pass_uses pu
              JOIN passes p ON pu.pass_id = p.id
-             WHERE p.user_email = ? AND pu.class_id = ? LIMIT 1`,
-            [userEmail, classId],
+             WHERE LOWER(p.user_email) = ? AND pu.class_id = ? LIMIT 1`,
+            [normalizedEmail, classId],
             (dupeErr, dupeRow) => {
               if (dupeErr || dupeRow) return cb(null); // already done
               const usedAt = new Date().toISOString();
@@ -969,19 +970,19 @@ const processDuePassUses = () => {
           return;
         }
         const row = rows[index];
-        const email = row.email;
+        const emailNorm = String(row.email).toLowerCase().trim();
         const classId = row.class_id;
 
         db.get(
-          "SELECT id, remaining FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
-          [email],
+          "SELECT id, remaining FROM passes WHERE LOWER(user_email) = ? ORDER BY created_at DESC LIMIT 1",
+          [emailNorm],
           (passErr, passRow) => {
             if (passErr || !passRow) {
               return processNext(index + 1);
             }
             db.get(
-              "SELECT id FROM pass_use_exclusions WHERE user_email = ? AND class_id = ?",
-              [email, classId],
+              "SELECT id FROM pass_use_exclusions WHERE LOWER(user_email) = ? AND class_id = ?",
+              [emailNorm, classId],
               (exclErr, exclRow) => {
                 if (exclErr || exclRow) {
                   // Admin manuálisan törölte – nem hozzuk vissza
@@ -991,9 +992,9 @@ const processDuePassUses = () => {
                   `SELECT pu.id
                    FROM pass_uses pu
                    JOIN passes p ON pu.pass_id = p.id
-                   WHERE p.user_email = ? AND pu.class_id = ?
+                   WHERE LOWER(p.user_email) = ? AND pu.class_id = ?
                    LIMIT 1`,
-                  [email, classId],
+                  [emailNorm, classId],
                   (useErr, useRow) => {
                     if (useErr || useRow) {
                       return processNext(index + 1);
@@ -1631,7 +1632,7 @@ app.post("/api/admin/passes/assign", requireAdmin, (req, res) => {
       if (!row) {
         return res.status(404).json({ error: "User not found" });
       }
-      createPassWithDebtTransfer(row.email, 10, null, (createErr) => {
+      createPassWithDebtTransfer(normalizedEmail, 10, null, (createErr) => {
         if (createErr) {
           return res.status(500).json({ error: "Database error" });
         }
@@ -1642,9 +1643,11 @@ app.post("/api/admin/passes/assign", requireAdmin, (req, res) => {
 });
 
 app.get("/api/admin/passes/:email", requireAdmin, (req, res) => {
-  const email = req.params.email;
+  const email = String(req.params.email || "")
+    .toLowerCase()
+    .trim();
   db.get(
-    "SELECT * FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
+    "SELECT * FROM passes WHERE LOWER(user_email) = ? ORDER BY created_at DESC LIMIT 1",
     [email],
     (err, passRow) => {
       if (err) {
@@ -1689,6 +1692,7 @@ app.post("/api/admin/passes/set", requireAdmin, (req, res) => {
   if (!email) {
     return res.status(400).json({ error: "Email required" });
   }
+  const normalizedEmail = String(email).toLowerCase().trim();
   const totalValue = Number(total);
   const remainingValue = Number(remaining);
   if (!Number.isFinite(totalValue) || totalValue < 0) {
@@ -1699,7 +1703,7 @@ app.post("/api/admin/passes/set", requireAdmin, (req, res) => {
   }
   db.get(
     "SELECT email FROM users WHERE LOWER(email) = ?",
-    [email],
+    [normalizedEmail],
     (err, row) => {
       if (err) {
         return res.status(500).json({ error: "Database error" });
@@ -1708,8 +1712,8 @@ app.post("/api/admin/passes/set", requireAdmin, (req, res) => {
         return res.status(404).json({ error: "User not found" });
       }
       db.get(
-        "SELECT id FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
-        [email],
+        "SELECT id FROM passes WHERE LOWER(user_email) = ? ORDER BY created_at DESC LIMIT 1",
+        [normalizedEmail],
         (findErr, passRow) => {
           if (findErr) {
             return res.status(500).json({ error: "Database error" });
@@ -1722,7 +1726,12 @@ app.post("/api/admin/passes/set", requireAdmin, (req, res) => {
               : "UPDATE passes SET total = ?, remaining = ? WHERE id = ?";
 
             const params = shouldInsert
-              ? [email, totalValue, remainingValue, new Date().toISOString()]
+              ? [
+                  normalizedEmail,
+                  totalValue,
+                  remainingValue,
+                  new Date().toISOString(),
+                ]
               : [totalValue, remainingValue, passId];
 
             db.run(query, params, function onUpdate(updateErr) {
@@ -1853,9 +1862,10 @@ app.delete("/api/admin/passes/use/:id", requireAdmin, (req, res) => {
             const exclSql = IS_POSTGRES
               ? "INSERT INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?) ON CONFLICT (user_email, class_id) DO NOTHING"
               : "INSERT OR IGNORE INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?)";
+            const exclEmail = String(row.user_email).toLowerCase().trim();
             db.run(
               exclSql,
-              [row.user_email, row.class_id, new Date().toISOString()],
+              [exclEmail, row.class_id, new Date().toISOString()],
               (exclErr) => {
                 if (exclErr) {
                   console.error(
@@ -1945,15 +1955,15 @@ app.get("/api/admin/users/with-pass", requireAdmin, (req, res) => {
        u.birth_date,
        u.phone,
        u.created_at,
-       (SELECT p.total FROM passes p WHERE p.user_email = u.email ORDER BY p.created_at DESC LIMIT 1) AS pass_total,
-       (SELECT p.remaining FROM passes p WHERE p.user_email = u.email ORDER BY p.created_at DESC LIMIT 1) AS pass_remaining,
+       (SELECT p.total FROM passes p WHERE LOWER(p.user_email) = LOWER(u.email) ORDER BY p.created_at DESC LIMIT 1) AS pass_total,
+       (SELECT p.remaining FROM passes p WHERE LOWER(p.user_email) = LOWER(u.email) ORDER BY p.created_at DESC LIMIT 1) AS pass_remaining,
        (
          SELECT COUNT(*)
          FROM pass_uses pu
          WHERE pu.pass_id = (
            SELECT p2.id
            FROM passes p2
-           WHERE p2.user_email = u.email
+           WHERE LOWER(p2.user_email) = LOWER(u.email)
            ORDER BY p2.created_at DESC
            LIMIT 1
          )
@@ -2339,14 +2349,15 @@ app.post("/api/admin/classes/:id/signups/cancel", requireAdmin, (req, res) => {
   if (!email) {
     return res.status(400).json({ error: "Email required" });
   }
+  const normalizedEmail = String(email).toLowerCase().trim();
   db.get(
     `SELECT s.*, c.title AS class_title, c.starts_at AS class_starts
      FROM signups s
      JOIN classes c ON s.class_id = c.id
-     WHERE s.class_id = ? AND s.email = ?
+     WHERE s.class_id = ? AND LOWER(s.email) = ?
      ORDER BY s.created_at DESC
      LIMIT 1`,
-    [classId, email],
+    [classId, normalizedEmail],
     (err, row) => {
       if (err) {
         return res.status(500).json({ error: "Database error" });
@@ -2368,10 +2379,10 @@ app.post("/api/admin/classes/:id/signups/cancel", requireAdmin, (req, res) => {
             `SELECT pu.id, pu.pass_id
              FROM pass_uses pu
              JOIN passes p ON pu.pass_id = p.id
-             WHERE p.user_email = ? AND pu.class_id = ?
+             WHERE LOWER(p.user_email) = ? AND pu.class_id = ?
              ORDER BY pu.used_at DESC
              LIMIT 1`,
-            [email, row.class_id],
+            [normalizedEmail, row.class_id],
             (passErr, passUseRow) => {
               if (passErr) {
                 return res.status(500).json({ error: "Database error" });
@@ -2405,7 +2416,19 @@ app.post("/api/admin/classes/:id/signups/cancel", requireAdmin, (req, res) => {
                           .status(500)
                           .json({ error: "Database error" });
                       }
-                      return finalize();
+                      // Megakadályozzuk, hogy a sweep visszaírja ezt az alkalmot
+                      const exclSql = IS_POSTGRES
+                        ? "INSERT INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?) ON CONFLICT (user_email, class_id) DO NOTHING"
+                        : "INSERT OR IGNORE INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?)";
+                      db.run(
+                        exclSql,
+                        [
+                          normalizedEmail,
+                          row.class_id,
+                          new Date().toISOString(),
+                        ],
+                        () => finalize(),
+                      );
                     },
                   );
                 },
@@ -2691,6 +2714,7 @@ app.post("/api/admin/signups/:id/cancel", requireAdmin, (req, res) => {
       if (row.status === "cancelled" || row.status === "rejected") {
         return res.status(400).json({ error: "Signup already closed" });
       }
+      const normalizedEmail = String(row.email).toLowerCase().trim();
       db.run(
         "UPDATE signups SET status = 'cancelled' WHERE id = ?",
         [signupId],
@@ -2702,10 +2726,10 @@ app.post("/api/admin/signups/:id/cancel", requireAdmin, (req, res) => {
             `SELECT pu.id, pu.pass_id
              FROM pass_uses pu
              JOIN passes p ON pu.pass_id = p.id
-             WHERE p.user_email = ? AND pu.class_id = ?
+             WHERE LOWER(p.user_email) = ? AND pu.class_id = ?
              ORDER BY pu.used_at DESC
              LIMIT 1`,
-            [row.email, row.class_id],
+            [normalizedEmail, row.class_id],
             (passErr, passUseRow) => {
               if (passErr) {
                 return res.status(500).json({ error: "Database error" });
@@ -2739,7 +2763,19 @@ app.post("/api/admin/signups/:id/cancel", requireAdmin, (req, res) => {
                           .status(500)
                           .json({ error: "Database error" });
                       }
-                      return finalize();
+                      // Megakadályozzuk, hogy a sweep visszaírja ezt az alkalmot
+                      const exclSql = IS_POSTGRES
+                        ? "INSERT INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?) ON CONFLICT (user_email, class_id) DO NOTHING"
+                        : "INSERT OR IGNORE INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?)";
+                      db.run(
+                        exclSql,
+                        [
+                          normalizedEmail,
+                          row.class_id,
+                          new Date().toISOString(),
+                        ],
+                        () => finalize(),
+                      );
                     },
                   );
                 },
@@ -3229,9 +3265,12 @@ app.post(
 // stripeSessionId is optional (null for manual admin assignment)
 // ---------------------------------------------------------------------------
 const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
+  // Normalize email to avoid case-mismatch bugs when querying/inserting passes
+  const email = String(userEmail).toLowerCase().trim();
+
   db.get(
-    "SELECT id, total FROM passes WHERE user_email = ? ORDER BY created_at DESC LIMIT 1",
-    [userEmail],
+    "SELECT id, total, remaining FROM passes WHERE LOWER(user_email) = ? ORDER BY created_at DESC LIMIT 1",
+    [email],
     (err, oldPass) => {
       if (err) return cb(err);
 
@@ -3243,8 +3282,8 @@ const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
           ? "INSERT INTO passes (user_email, total, remaining, created_at, stripe_session_id) VALUES (?, ?, ?, ?, ?)"
           : "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)";
         const insertParams = stripeSessionId
-          ? [userEmail, total, newRemaining, createdAt, stripeSessionId]
-          : [userEmail, total, newRemaining, createdAt];
+          ? [email, total, newRemaining, createdAt, stripeSessionId]
+          : [email, total, newRemaining, createdAt];
         db.run(insertSql, insertParams, function onInsert(insertErr) {
           if (insertErr) return cb(insertErr);
           const newPassId = this.lastID;
@@ -3280,10 +3319,17 @@ const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
         (cntErr, cntRow) => {
           if (cntErr) return cb(cntErr);
           const oldUsed = cntRow ? Number(cntRow.cnt) : 0;
-          const oldRemaining = Math.max(0, oldPass.total - oldUsed);
-          const debt = Math.max(0, oldUsed - oldPass.total);
+          // Use BOTH the pass_uses count AND the stored remaining column as debt sources.
+          // The remaining column may reflect manually-set debt that isn't yet in pass_uses.
+          const oldRemainingByDb = Number(oldPass.remaining);
+          const oldRemainingByCount = oldPass.total - oldUsed;
+          // Take the minimum (most conservative) remaining to not miss any debt
+          const effectiveRemaining = Math.min(
+            oldRemainingByDb,
+            oldRemainingByCount,
+          );
 
-          if (oldRemaining > 0) {
+          if (effectiveRemaining > 0) {
             // Van még fel nem használt alkalom → akkumulálás
             const newTotal = oldPass.total + total;
             const newRemaining = newTotal - oldUsed;
@@ -3292,8 +3338,8 @@ const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
               ? "INSERT INTO passes (user_email, total, remaining, created_at, stripe_session_id) VALUES (?, ?, ?, ?, ?)"
               : "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)";
             const insertParams = stripeSessionId
-              ? [userEmail, newTotal, newRemaining, createdAt, stripeSessionId]
-              : [userEmail, newTotal, newRemaining, createdAt];
+              ? [email, newTotal, newRemaining, createdAt, stripeSessionId]
+              : [email, newTotal, newRemaining, createdAt];
             db.run(insertSql, insertParams, function onInsert(insertErr) {
               if (insertErr) return cb(insertErr);
               const newPassId = this.lastID;
@@ -3306,43 +3352,79 @@ const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
             });
           } else {
             // Teljesen felhasznált vagy tartozásos bérlet → fresh start
-            // Az eredeti tartozás-bejegyzések dátumát megőrizzük (nem töröljük és nem hozzuk létre újra)
-            // Lekérjük az összes pass_use-t időrend szerint
+            // Debt from DB remaining column (e.g. manually set via admin panel)
+            const debtByDb = Math.max(0, -oldRemainingByDb);
+            // Debt from actual pass_uses count
+            const debtByCount = Math.max(0, oldUsed - oldPass.total);
+            // Use the higher of the two so that manually-set debt is not lost
+            const actualDebt = Math.max(debtByDb, debtByCount);
+
+            // Lekérjük az összes pass_use-t időrend szerint (class_id is kell az exclusion miatt)
             db.all(
-              "SELECT id FROM pass_uses WHERE pass_id = ? ORDER BY used_at ASC",
+              "SELECT id, class_id FROM pass_uses WHERE pass_id = ? ORDER BY used_at ASC",
               [oldPass.id],
               (usesErr, useRows) => {
                 if (usesErr) return cb(usesErr);
-                // Az első oldPass.total db "normális" bejegyzés – ezeket töröljük
-                // A maradék debt db az "átlépett" bejegyzések – ezeket migráljuk
-                const paidIds = (useRows || [])
-                  .slice(0, oldPass.total)
+                const allRows = useRows || [];
+                const allIds = allRows.map((r) => r.id);
+                // Az első (allRows.length - debtByCount) bejegyzés "normális" → töröljük
+                // Az utolsó debtByCount bejegyzés "átlépett" → migráljuk
+                const paidRows = allRows.slice(0, allRows.length - debtByCount);
+                const debtIds = allRows
+                  .slice(allRows.length - debtByCount)
                   .map((r) => r.id);
-                const debtIds = (useRows || [])
-                  .slice(oldPass.total)
-                  .map((r) => r.id);
+                const paidIds = paidRows.map((r) => r.id);
+                // Ha a DB remaining-alapú tartozás nagyobb mint a pass_uses-alapú,
+                // a különbséget új bejegyzésként hozzuk létre az új bérletben
+                const extraDebt = actualDebt - debtIds.length;
 
                 const createdAt = new Date().toISOString();
-                const newRemaining = total - debtIds.length;
+                const newRemaining = total - actualDebt;
                 const insertSql = stripeSessionId
                   ? "INSERT INTO passes (user_email, total, remaining, created_at, stripe_session_id) VALUES (?, ?, ?, ?, ?)"
                   : "INSERT INTO passes (user_email, total, remaining, created_at) VALUES (?, ?, ?, ?)";
                 const insertParams = stripeSessionId
-                  ? [userEmail, total, newRemaining, createdAt, stripeSessionId]
-                  : [userEmail, total, newRemaining, createdAt];
+                  ? [email, total, newRemaining, createdAt, stripeSessionId]
+                  : [email, total, newRemaining, createdAt];
 
                 db.run(insertSql, insertParams, function onInsert(insertErr) {
                   if (insertErr) return cb(insertErr);
                   const newPassId = this.lastID;
 
-                  // Normál bejegyzések törlése
+                  // Normál bejegyzések törlése + exclusion hozzáadása, hogy a sweep ne írja vissza
                   const deletePaid = (done) => {
                     if (paidIds.length === 0) return done();
                     const placeholders = paidIds.map(() => "?").join(",");
                     db.run(
                       `DELETE FROM pass_uses WHERE id IN (${placeholders})`,
                       paidIds,
-                      (delErr) => done(delErr),
+                      (delErr) => {
+                        if (delErr) return done(delErr);
+                        // Az óra-kötött törölt bejegyzéseket felvesszük az exclusions-ba,
+                        // hogy a sweep ne adja hozzá újra az új bérlethez
+                        const classRows = paidRows.filter((r) => r.class_id);
+                        if (classRows.length === 0) return done();
+                        const exclSql = IS_POSTGRES
+                          ? "INSERT INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?) ON CONFLICT (user_email, class_id) DO NOTHING"
+                          : "INSERT OR IGNORE INTO pass_use_exclusions (user_email, class_id, created_at) VALUES (?, ?, ?)";
+                        const now = new Date().toISOString();
+                        let pending = classRows.length;
+                        let failed = false;
+                        classRows.forEach((r) => {
+                          db.run(
+                            exclSql,
+                            [email, r.class_id, now],
+                            (exclErr) => {
+                              if (exclErr && !failed) {
+                                failed = true;
+                                return done(exclErr);
+                              }
+                              pending--;
+                              if (pending === 0 && !failed) done();
+                            },
+                          );
+                        });
+                      },
                     );
                   };
 
@@ -3357,11 +3439,37 @@ const createPassWithDebtTransfer = (userEmail, total, stripeSessionId, cb) => {
                     );
                   };
 
+                  // Extra tartozás bejegyzések létrehozása (ha a DB remaining több tartozást mutat
+                  // mint amennyit a pass_uses tartalmaz)
+                  const createExtraDebt = (done) => {
+                    if (extraDebt <= 0) return done();
+                    const now = new Date().toISOString();
+                    let pending = extraDebt;
+                    let failed = false;
+                    for (let i = 0; i < extraDebt; i++) {
+                      db.run(
+                        "INSERT INTO pass_uses (pass_id, used_at) VALUES (?, ?)",
+                        [newPassId, now],
+                        (useErr) => {
+                          if (useErr && !failed) {
+                            failed = true;
+                            return done(useErr);
+                          }
+                          pending--;
+                          if (pending === 0 && !failed) done();
+                        },
+                      );
+                    }
+                  };
+
                   deletePaid((delErr) => {
                     if (delErr) return cb(delErr);
-                    migrateDebt((migrateErr) =>
-                      cb(migrateErr || null, !migrateErr),
-                    );
+                    migrateDebt((migrateErr) => {
+                      if (migrateErr) return cb(migrateErr);
+                      createExtraDebt((extraErr) =>
+                        cb(extraErr || null, !extraErr),
+                      );
+                    });
                   });
                 });
               },
