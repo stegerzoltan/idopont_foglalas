@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: idopont-foglalas
+    env: node
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+    # Cache node_modules between builds to avoid re-downloading packages
+    buildFilter:
+      paths:
+        - package.json
+        - package-lock.json
