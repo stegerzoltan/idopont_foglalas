@@ -8,8 +8,19 @@
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <meta name="theme-color" content="#1a1a2e" />
   <link rel="stylesheet" href="/styles.css?v=20260313" />
+  <link rel="stylesheet" href="/theme-halloween.css?v=20260313" />
 </head>
 <body>
+  <div class="hw-moon halloween-only" aria-hidden="true"></div>
+  <div class="halloween-decor" aria-hidden="true">
+    <span class="hw-bat hw-bat--1">🦇</span>
+    <span class="hw-bat hw-bat--2">🦇</span>
+    <span class="hw-bat hw-bat--3">🦇</span>
+    <div class="hw-spider"><span class="hw-spider-thread"></span><span class="hw-spider-body">🕷️</span></div>
+    <span class="hw-ghost hw-ghost--1">👻</span>
+    <span class="hw-ghost hw-ghost--2">👻</span>
+    <div class="hw-fog"></div>
+  </div>
   <header class="site-header">
     <div class="brand">
       <p class="brand-kicker">Stégermájer Zoltán edzésére</p>
@@ -170,6 +181,16 @@
             <button id="regenerate-classes" class="ghost" type="button">Heti órák újragenerálása</button>
             <button id="admin-logout" class="ghost" type="button">Kijelentkezés</button>
           </div>
+        </div>
+
+        <div class="notice theme-panel">
+          <strong>Oldal témája</strong>
+          <p class="helper">A választott téma minden látogatónál megjelenik.</p>
+          <div class="form-actions theme-switch" role="group" aria-label="Oldal témája">
+            <button type="button" class="ghost" data-theme-option="halloween">🎃 Halloween</button>
+            <button type="button" class="ghost" data-theme-option="classic">Klasszikus</button>
+          </div>
+          <p class="helper" id="theme-status"></p>
         </div>
 
         <div class="notice pass-panel">

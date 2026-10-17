@@ -60,14 +60,20 @@ app.set("trust proxy", 1);
 // This ensures that every deploy gets a new version number, forcing browsers to refresh cached assets
 const BUILD_VERSION = Date.now().toString(36).toUpperCase();
 
+const THEMES = ["halloween", "classic"];
+const DEFAULT_THEME = "halloween";
+
 // Middleware to serve index.html with dynamic version numbers
-app.get("/", (req, res) => {
+app.get("/", async (req, res) => {
   let html = fs.readFileSync(
     path.join(__dirname, "public", "index.html"),
     "utf-8",
   );
   // Replace all occurrences of v=XXXXXXXX with current version
   html = html.replace(/v=\d+/g, `v=${BUILD_VERSION}`);
+  // A téma szerveren kerül az <html> elemre, így nincs villanás betöltéskor
+  const theme = await getTheme();
+  html = html.replace("<html lang=\"hu\">", `<html lang="hu" data-theme="${theme}">`);
   res.setHeader("Cache-Control", "no-store");
   res.type("html").send(html);
 });
@@ -340,6 +346,12 @@ const initDb = async () => {
         UNIQUE(user_email, class_id)
       )`,
     );
+    await pgPool.query(
+      `CREATE TABLE IF NOT EXISTS app_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT NOT NULL
+      )`,
+    );
     return;
   }
 
@@ -446,6 +458,12 @@ const initDb = async () => {
           class_id INTEGER NOT NULL,
           created_at TEXT NOT NULL,
           UNIQUE(user_email, class_id)
+        )`,
+      );
+      db.run(
+        `CREATE TABLE IF NOT EXISTS app_settings (
+          setting_key TEXT PRIMARY KEY,
+          setting_value TEXT NOT NULL
         )`,
       );
       db.run("ALTER TABLE users ADD COLUMN phone TEXT", () => {});
@@ -685,6 +703,20 @@ const dbGetAsync = (sql, params = []) =>
       resolve(row || null);
     });
   });
+
+const getTheme = async () => {
+  try {
+    const row = await dbGetAsync(
+      "SELECT setting_value FROM app_settings WHERE setting_key = ?",
+      ["theme"],
+    );
+    return row && THEMES.includes(row.setting_value)
+      ? row.setting_value
+      : DEFAULT_THEME;
+  } catch (err) {
+    return DEFAULT_THEME;
+  }
+};
 
 const escapeIcsText = (value) =>
   String(value || "")
@@ -1584,6 +1616,27 @@ app.post("/api/admin/logout", (req, res) => {
   req.session.destroy(() => {
     res.json({ ok: true });
   });
+});
+
+app.get("/api/theme", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ theme: await getTheme(), themes: THEMES });
+});
+
+app.post("/api/admin/theme", requireAdmin, async (req, res) => {
+  const theme = String(req.body.theme || "");
+  if (!THEMES.includes(theme)) {
+    return res.status(400).json({ error: "Invalid theme" });
+  }
+  const sql = IS_POSTGRES
+    ? "INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value RETURNING setting_key"
+    : "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES (?, ?)";
+  try {
+    await dbRunAsync(sql, ["theme", theme]);
+    return res.json({ ok: true, theme });
+  } catch (err) {
+    return res.status(500).json({ error: "Database error" });
+  }
 });
 
 app.post("/api/admin/classes/regenerate", requireAdmin, (req, res) => {

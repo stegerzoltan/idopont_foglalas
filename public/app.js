@@ -2019,6 +2019,37 @@ adminLogout?.addEventListener("click", async () => {
   closeAdminPage();
 });
 
+const themeButtons = document.querySelectorAll("[data-theme-option]");
+const themeStatus = document.getElementById("theme-status");
+
+const applyTheme = (theme) => {
+  document.documentElement.dataset.theme = theme;
+  themeButtons.forEach((button) => {
+    const isActive = button.dataset.themeOption === theme;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+};
+
+applyTheme(document.documentElement.dataset.theme || "classic");
+
+themeButtons.forEach((button) => {
+  button.addEventListener("click", async () => {
+    const theme = button.dataset.themeOption;
+    themeStatus.textContent = "Mentés...";
+    const response = await apiFetch("/api/admin/theme", {
+      method: "POST",
+      body: JSON.stringify({ theme }),
+    });
+    if (!response.ok) {
+      themeStatus.textContent = "A téma mentése nem sikerült.";
+      return;
+    }
+    applyTheme(theme);
+    themeStatus.textContent = "Téma mentve, minden látogatónál megjelenik.";
+  });
+});
+
 regenerateClassesButton?.addEventListener("click", async () => {
   const confirmed = window.confirm(
     "Biztosan újragenerálod a heti órákat? A bérlet és a meglévő feliratkozások dátumai megmaradnak, csak az üres jövőbeli órák frissülnek.",
