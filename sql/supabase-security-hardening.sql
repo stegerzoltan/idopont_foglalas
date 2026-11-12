@@ -5,22 +5,16 @@ BEGIN;
 
 DO $$
 DECLARE
-  table_name TEXT;
-  target_tables TEXT[] := ARRAY[
-    'classes',
-    'signups',
-    'notifications',
-    'users',
-    'push_subscriptions',
-    'passes',
-    'pass_uses'
-  ];
+  tbl RECORD;
 BEGIN
-  FOREACH table_name IN ARRAY target_tables
+  -- Every ordinary table in public, so newly added tables are covered too.
+  FOR tbl IN
+    SELECT c.relname
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
   LOOP
-    IF to_regclass(format('public.%I', table_name)) IS NOT NULL THEN
-      EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', table_name);
-    END IF;
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', tbl.relname);
   END LOOP;
 END
 $$;

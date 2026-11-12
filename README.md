@@ -72,6 +72,6 @@ Render production deploy eseten erosen ajanlott a `DATABASE_URL` beallitasa, hog
 
 A script:
 
-- bekapcsolja az RLS-t az alkalmazas tablaira,
+- bekapcsolja az RLS-t a `public` semaban levo osszes tablara (ujakra is, ha ujrafuttatod),
 - visszavonja az `anon` es `authenticated` szerepkorok teljes jogosultsagait,
 - es a jovobeni objektumokra is alapbol tiltja ezeket a jogosultsagokat.
